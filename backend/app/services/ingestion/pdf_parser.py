@@ -3,13 +3,13 @@ import re
 import json
 import pymupdf
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Tuple
 
 class PDFParser:
     """
-    ANVAYA Defense PDF Parsing Service
-    Uses PyMuPDF (fitz) structural layout block parsing + regex text normalization
-    + bounding box spatial coordinates (x0, y0, x1, y1) + Markdown table preservation.
+    ANVAYA Defense PDF Parser & High-Fidelity Table Extractor
+    Uses PyMuPDF layout block sorting + strict table validation filter to produce
+    clean, human-readable text and pristine Markdown tables without false-positive pipe boxes.
     """
     def __init__(self, output_dir: str = "data/processed_text", manifest_path: str = "data/metadata.json"):
         self.output_dir = output_dir
@@ -18,13 +18,107 @@ class PDFParser:
         os.makedirs(os.path.dirname(self.manifest_path), exist_ok=True)
 
     def clean_text(self, text: str) -> str:
-        """PyMuPDF Regex text cleaning & normalization"""
-        text = text.replace("\f", " ")                   # remove form feed
-        text = re.sub(r"-\n", "", text)                  # fix hyphenation across lines
-        text = re.sub(r"\s+\n", "\n", text)              # trim spaces before newlines
-        text = re.sub(r"\n{3,}", "\n\n", text)           # collapse excessive newlines
-        text = re.sub(r"[ ]{2,}", " ", text)             # collapse multiple spaces
+        """Normalizes text, strips print timestamps and fixes line hyphens."""
+        # Remove browser print timestamps like "26/08/2026, 08:24"
+        text = re.sub(r"\d{2}/\d{2}/\d{4},\s*\d{2}:\d{2}", "", text)
+        # Remove repeated footer strings
+        text = re.sub(r"FPM Unit \d+ Master Question Bank.*", "", text)
+        text = text.replace("\f", " ")
+        text = re.sub(r"-\n", "", text)
+        text = re.sub(r"[ \t]+\n", "\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = re.sub(r"[ ]{2,}", " ", text)
         return text.strip()
+
+    def _is_valid_data_table(self, grid: List[List[Any]]) -> bool:
+        """
+        Strict filter to verify if a candidate grid is a TRUE structured data table
+        (e.g., CPM/PERT comparison, Float matrix) vs. a false-positive paragraph box.
+        """
+        if not grid or len(grid) < 2:
+            return False
+
+        num_cols = len(grid[0])
+        if num_cols < 2:
+            return False
+
+        total_cells = 0
+        long_paragraph_cells = 0
+
+        for row in grid:
+            for cell in row:
+                cell_text = str(cell or "").strip()
+                if cell_text:
+                    total_cells += 1
+                    # Data table cells contain short terms/numbers; paragraph boxes contain huge blocks
+                    if len(cell_text) > 160:
+                        long_paragraph_cells += 1
+
+        # If > 25% of cells contain long paragraph blocks, it's a paragraph box, not a data table!
+        if total_cells > 0 and (long_paragraph_cells / total_cells) > 0.25:
+            return False
+
+        return True
+
+    def extract_structured_page_content(self, page: pymupdf.Page) -> Tuple[str, List[float]]:
+        """
+        Extracts page text with high-fidelity Markdown table formatting.
+        Applies strict data table validation to prevent false-positive pipe boxes around paragraphs.
+        """
+        tables_md = []
+        table_bboxes = []
+
+        # 1. Detect and validate true structured data tables
+        try:
+            tabs = page.find_tables()
+            if tabs and tabs.tables:
+                for tab in tabs.tables:
+                    grid = tab.extract()
+                    if grid and self._is_valid_data_table(grid):
+                        clean_grid = [[str(cell or "").replace("\n", " ").strip() for cell in row] for row in grid]
+                        if clean_grid and clean_grid[0]:
+                            headers = clean_grid[0]
+                            md = "\n\n| " + " | ".join(headers) + " |\n"
+                            md += "| " + " | ".join(["---"] * len(headers)) + " |\n"
+                            for row in clean_grid[1:]:
+                                md += "| " + " | ".join(row) + " |\n"
+                            tables_md.append(md)
+                            table_bboxes.append(tab.bbox)
+        except Exception:
+            pass
+
+        # 2. Extract non-table text blocks
+        blocks = page.get_text("blocks")
+        non_table_blocks = []
+        page_bbox = [0, 0, 0, 0]
+
+        if blocks:
+            text_blocks = [b for b in blocks if b[6] == 0]
+            if text_blocks:
+                x0 = min(b[0] for b in text_blocks)
+                y0 = min(b[1] for b in text_blocks)
+                x1 = max(b[2] for b in text_blocks)
+                y1 = max(b[3] for b in text_blocks)
+                page_bbox = [round(x0, 2), round(y0, 2), round(x1, 2), round(y1, 2)]
+
+            for b in text_blocks:
+                bx0, by0, bx1, by1 = b[0], b[1], b[2], b[3]
+                # Check overlap with validated data tables
+                in_table = False
+                for tbox in table_bboxes:
+                    if not (bx1 < tbox[0] or bx0 > tbox[2] or by1 < tbox[1] or by0 > tbox[3]):
+                        in_table = True
+                        break
+                if not in_table:
+                    block_text = b[4].strip()
+                    if block_text:
+                        non_table_blocks.append(block_text)
+
+        body_text = "\n\n".join(non_table_blocks)
+        if tables_md:
+            body_text += "\n\n" + "\n".join(tables_md)
+
+        return self.clean_text(body_text), page_bbox
 
     def parse_pdf(self, pdf_path: str) -> Dict[str, Any]:
         if not os.path.exists(pdf_path):
@@ -38,39 +132,18 @@ class PDFParser:
 
         print(f"[PDF] Processing: {base_filename}")
 
-        # Page-by-page extraction with structural layout blocks & bounding box spatial coordinates
         for page_idx, page in enumerate(doc, start=1):
-            raw_text = page.get_text()
-            cleaned_page_text = self.clean_text(raw_text)
+            cleaned_text, bbox = self.extract_structured_page_content(page)
 
-            # Table preservation check
-            tables_md = self._extract_tables_as_markdown(page)
-            if tables_md:
-                cleaned_page_text += "\n\n" + tables_md
-
-            if cleaned_page_text:
-                full_text_list.append(cleaned_page_text)
-
-                # Extract layout blocks for spatial coordinates
-                blocks = page.get_text("blocks")
-                page_bbox = [0, 0, 0, 0]
-                if blocks:
-                    # Filter text blocks (block[6] == 0)
-                    text_blocks = [b for b in blocks if b[6] == 0]
-                    if text_blocks:
-                        x0 = min(b[0] for b in text_blocks)
-                        y0 = min(b[1] for b in text_blocks)
-                        x1 = max(b[2] for b in text_blocks)
-                        y1 = max(b[3] for b in text_blocks)
-                        page_bbox = [round(x0, 2), round(y0, 2), round(x1, 2), round(y1, 2)]
-
+            if cleaned_text:
+                full_text_list.append(cleaned_text)
                 page_chunks.append({
                     "file_name": base_filename,
                     "media_type": "pdf",
                     "page_number": page_idx,
-                    "text": cleaned_page_text,
-                    "char_count": len(cleaned_page_text),
-                    "bbox": page_bbox
+                    "text": cleaned_text,
+                    "char_count": len(cleaned_text),
+                    "bbox": bbox
                 })
 
         combined_text = "\n\n".join(full_text_list)
@@ -81,7 +154,6 @@ class PDFParser:
         with open(out_path, "w", encoding="utf-8") as out:
             out.write(combined_text)
 
-        # Extract & normalize metadata
         raw_meta = doc.metadata or {}
         base_name = os.path.splitext(base_filename)[0]
 
@@ -94,44 +166,16 @@ class PDFParser:
             "source": "document"
         }
 
-        # Update metadata.json manifest
         self._update_manifest(metadata)
         doc.close()
 
-        print(f"[OK] Extracted {len(page_chunks)} page chunks for {base_filename}")
+        print(f"[OK] Extracted {len(page_chunks)} structured page chunks for {base_filename}")
 
         return {
             "metadata": metadata,
             "text_path": out_path,
             "page_chunks": page_chunks
         }
-
-    def _extract_tables_as_markdown(self, page: pymupdf.Page) -> str:
-        """Detects PDF grid tables and converts them to explicit Markdown tables."""
-        try:
-            tabs = page.find_tables()
-            if not tabs or len(tabs.tables) == 0:
-                return ""
-
-            table_output = ""
-            for table in tabs:
-                grid = table.extract()
-                if not grid or len(grid) == 0:
-                    continue
-
-                headers = [str(cell or "").replace("\n", " ").strip() for cell in grid[0]]
-                markdown_table = "\n| " + " | ".join(headers) + " |\n"
-                markdown_table += "| " + " | ".join(["---"] * len(headers)) + " |\n"
-
-                for row in grid[1:]:
-                    row_cells = [str(cell or "").replace("\n", " ").strip() for cell in row]
-                    markdown_table += "| " + " | ".join(row_cells) + " |\n"
-
-                table_output += markdown_table + "\n"
-
-            return table_output.strip()
-        except Exception:
-            return ""
 
     def _update_manifest(self, metadata: Dict[str, Any]):
         manifest = []

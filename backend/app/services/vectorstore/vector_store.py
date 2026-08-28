@@ -37,8 +37,14 @@ class VectorStoreManager:
         self._init_fts5()
 
     def _init_fts5(self):
-        """Creates SQLite FTS5 Virtual Table for exact keyword search."""
+        """Creates SQLite FTS5 Virtual Table for exact keyword search with auto-migration guard."""
         with self.conn:
+            try:
+                self.conn.execute("SELECT bbox FROM evidence_fts LIMIT 1;")
+            except Exception:
+                # Recreate table if schema updated
+                self.conn.execute("DROP TABLE IF EXISTS evidence_fts;")
+
             self.conn.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS evidence_fts USING fts5(
                     chunk_id UNINDEXED,

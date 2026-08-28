@@ -24,6 +24,7 @@ data/uploads/
 data/anvaya_fts.db
 data/metadata.json
 data/sample_case/
+data/*.py
 backend/data/
 models/
 
