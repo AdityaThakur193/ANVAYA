@@ -15,16 +15,16 @@ Designed specifically for secure, air-gapped environments with **zero internet c
 
 ---
 
-## 🛠️ Final Technology Stack
+## 🛠️ Final Technology Stack (Option A: 100% Offline Single-Page Architecture)
 
+* **Frontend Console**: Vite + React 19 + TypeScript + Tailwind CSS (0 SSR hydration bugs, instant static build)
 * **Backend Engine**: Python 3.11 + FastAPI + Uvicorn
-* **Document Ingestion**: PyMuPDF (`fitz`) + Regex text normalization
-* **Image OCR Ingestion**: PaddleOCR / Tesseract 5 (Scanned notes & screenshots)
+* **Document Ingestion**: PyMuPDF (`fitz`) + Regex text normalization (`pdf_parser.py`)
+* **Image OCR Ingestion**: PaddleOCR / Tesseract 5 (`image_ocr.py`)
 * **Audio Ingestion**: `faster-whisper-tiny` (CTranslate2 INT8 millisecond speech-to-text)
 * **Vector Store**: Embedded ChromaDB (HNSW index) + `BAAI/bge-small-en-v1.5` embeddings (133MB ONNX)
 * **Hybrid Search**: Dense Cosine Similarity + BM25 Lexical Keyword Search (Reciprocal Rank Fusion RRF)
 * **Local Offline LLM**: `Llama-3.2-3B-Instruct.Q4_K_M.gguf` via `llama.cpp` (100% Zero Cloud)
-* **Frontend UI**: React 19 + TypeScript + Vite + Tailwind CSS
 * **Citation Navigation**: `pdfjs-dist` (PDF page highlight) + `wavesurfer.js` (Audio timestamp waveform player)
 
 ---
@@ -33,24 +33,25 @@ Designed specifically for secure, air-gapped environments with **zero internet c
 
 ```
 ANVAYA/
-├── README.md                           # Project definition & Overview
+├── README.md                           # Updated Project Definition & Tech Stack
 ├── backend/                            # Python FastAPI Server Engine
 │   ├── app/
 │   │   ├── main.py                     # FastAPI entry point
 │   │   ├── api/                        # REST endpoints (/ingest, /query)
 │   │   └── services/                   # Data processing modules
-│   │       ├── pdf_parser.py           # PyMuPDF & Regex text cleaning parser
+│   │       ├── pdf_parser.py           # PyMuPDF & Regex text cleaning module
 │   │       ├── image_ocr.py            # PaddleOCR screenshot text extractor
 │   │       ├── audio_transcriber.py    # Whisper timestamp audio transcriber
 │   │       ├── vector_store.py         # ChromaDB + BM25 RRF hybrid index
 │   │       └── local_llm.py            # llama.cpp local quantized LLM engine
 │   └── requirements.txt                # Python backend dependencies
-├── frontend/                           # React 19 Analyst UI Console
+├── frontend/                           # Vite + React 19 Analyst UI Console
 │   ├── src/
+│   │   ├── main.tsx
 │   │   ├── App.tsx                     # Master Analyst Console UI
-│   │   ├── components/                 # PDFViewer & AudioPlayer components
-│   │   └── services/                   # API client
+│   │   └── index.css                   # Tailwind CSS
 │   ├── index.html
+│   ├── vite.config.ts
 │   └── package.json
 └── data/                               # Local Storage & Vector Database
     ├── processed_text/                 # Cleaned text outputs & metadata
