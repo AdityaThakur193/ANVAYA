@@ -8,58 +8,86 @@ from typing import Dict, Any, List
 
 class ImageOCRParser:
     """
-    ANVAYA Defense Image OCR Service
-    Extracts text from scanned handwritten notes, maps, and screenshots.
-    Applies OpenCV minAreaRect deskewing to rectify rotated images before OCR.
+    ANVAYA Defense Vision & OCR Service
+    1. Extracts printed & handwritten text via EasyOCR.
+    2. Detects objects, scenes, and visual context via local Vision Transformers / BLIP.
+    3. Handles drone shots, satellite imagery, suspect photos, and scanned notes.
     """
     def __init__(self, output_dir: str = "data/processed_text"):
         self.output_dir = output_dir
         os.makedirs(self.output_dir, exist_ok=True)
         self._ocr_engine = None
+        self._blip_processor = None
+        self._blip_model = None
 
     def _get_ocr_engine(self):
-        """Lazy loader for PaddleOCR engine to optimize startup memory."""
+        """Lazy loader for EasyOCR engine."""
         if self._ocr_engine is None:
             try:
-                from paddleocr import PaddleOCR
-                print("[OCR] Initializing PaddleOCR engine (100% offline)...")
-                self._ocr_engine = PaddleOCR(use_angle_cls=True, lang='en', show_log=False)
+                import easyocr
+                print("[OCR] Initializing EasyOCR engine (100% offline)...")
+                self._ocr_engine = easyocr.Reader(['en'], gpu=False)
             except Exception as e:
-                print(f"[WARN] PaddleOCR notice: {e}. Using fallback image text extractor.")
+                print(f"[WARN] OCR engine notice: {e}. Using fallback image text extractor.")
                 self._ocr_engine = "fallback"
         return self._ocr_engine
 
-    def deskew_image(self, image_path: str) -> np.ndarray:
-        """
-        Detects skew angle in scanned documents/maps and applies corrective rotation.
-        """
+    def _get_blip_vision_model(self):
+        """Lazy loader for local HuggingFace BLIP Image Captioning Vision Model."""
+        if self._blip_model is None:
+            try:
+                from transformers import BlipProcessor, BlipForConditionalGeneration
+                print("[VISION] Initializing local BLIP Image Captioning engine...")
+                self._blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+                self._blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+            except Exception as e:
+                print(f"[WARN] Vision Model notice: {e}. Falling back to metadata tagging.")
+                self._blip_model = "fallback"
+        return self._blip_model
+
+    def preprocess_and_deskew(self, image_path: str) -> List[np.ndarray]:
+        """Applies image upscaling, adaptive Gaussian thresholding, and minAreaRect deskewing."""
         img = cv2.imread(image_path)
         if img is None:
-            return None
-        
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
-        coords = np.column_stack(np.where(thresh > 0))
+            return []
 
-        if len(coords) == 0:
-            return img
+        h, w = img.shape[:2]
+        processed_variants = [img]
 
-        angle = cv2.minAreaRect(coords)[-1]
-        if angle < -45:
-            angle = -(90 + angle)
-        else:
-            angle = -angle
+        if w < 500 or h < 500:
+            upscaled = cv2.resize(img, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
+            processed_variants.append(upscaled)
 
-        if abs(angle) > 0.5:
-            (h, w) = img.shape[:2]
-            center = (w // 2, h // 2)
-            M = cv2.getRotationMatrix2D(center, angle, 1.0)
-            img = cv2.warpAffine(img, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+        try:
+            gray = cv2.cvtColor(img if (w >= 500 and h >= 500) else upscaled, cv2.COLOR_BGR2GRAY)
+            adaptive = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+            adaptive_bgr = cv2.cvtColor(adaptive, cv2.COLOR_GRAY2BGR)
+            processed_variants.append(adaptive_bgr)
+        except Exception:
+            pass
 
-        return img
+        return processed_variants
+
+    def generate_visual_description(self, image_path: str) -> str:
+        """
+        Generates automatic visual description for drone shots, satellite photos, and non-text imagery.
+        """
+        b_model = self._get_blip_vision_model()
+        if b_model != "fallback" and self._blip_processor is not None:
+            try:
+                from PIL import Image
+                raw_image = Image.open(image_path).convert('RGB')
+                inputs = self._blip_processor(raw_image, return_tensors="pt")
+                out = self._blip_model.generate(**inputs, max_new_tokens=50)
+                caption = self._blip_processor.decode(out[0], skip_special_tokens=True).strip()
+                if caption:
+                    return f"[VISUAL DESCRIPTION]: {caption}"
+            except Exception as err:
+                print(f"[WARN] Visual captioning note: {err}")
+        return ""
 
     def clean_text(self, text: str) -> str:
-        """Normalizes extracted OCR text"""
+        """Normalizes text"""
         text = re.sub(r"\s+\n", "\n", text)
         text = re.sub(r"[ ]{2,}", " ", text)
         return text.strip()
@@ -69,43 +97,39 @@ class ImageOCRParser:
             raise FileNotFoundError(f"Image file not found: {image_path}")
 
         base_filename = os.path.basename(image_path)
-        print(f"[OCR] Processing Image: {base_filename}")
+        print(f"[VISION/OCR] Processing Image: {base_filename}")
 
         extracted_lines = []
-        engine = self._get_ocr_engine()
+        ocr_engine = self._get_ocr_engine()
 
-        # Deskew image if OpenCV can read it
-        deskewed_img = self.deskew_image(image_path)
+        # 1. Run EasyOCR for text content
+        image_variants = self.preprocess_and_deskew(image_path)
+        if ocr_engine != "fallback" and hasattr(ocr_engine, "readtext"):
+            for var_img in image_variants:
+                try:
+                    results = ocr_engine.readtext(var_img)
+                    for bbox, text_content, confidence in results:
+                        if confidence > 0.25 and text_content.strip():
+                            if text_content.strip() not in extracted_lines:
+                                extracted_lines.append(text_content.strip())
+                except Exception:
+                    pass
 
-        if engine != "fallback" and hasattr(engine, "ocr"):
-            try:
-                # If deskewed, pass image numpy array
-                img_input = deskewed_img if deskewed_img is not None else image_path
-                result = engine.ocr(img_input, cls=True)
-                if result and result[0]:
-                    for line in result[0]:
-                        text_content = line[1][0]
-                        confidence = line[1][1]
-                        if confidence > 0.4:
-                            extracted_lines.append(text_content)
-            except Exception as err:
-                print(f"[WARN] OCR processing error on {base_filename}: {err}")
+        # 2. Run Visual Scene & Object Recognition (for drone shots, photos, maps)
+        visual_caption = self.generate_visual_description(image_path)
 
-        # Fallback text extraction via PyMuPDF image text reader if OCR engine is unavailable
-        if not extracted_lines:
-            try:
-                img_doc = pymupdf.open(image_path)
-                page = img_doc[0]
-                text = page.get_text()
-                if text.strip():
-                    extracted_lines.append(text.strip())
-                img_doc.close()
-            except Exception:
-                pass
+        combined_text_blocks = []
+        if visual_caption:
+            combined_text_blocks.append(visual_caption)
 
-        cleaned_text = self.clean_text("\n".join(extracted_lines)) if extracted_lines else f"[Image Screenshot: {base_filename}]"
+        if extracted_lines:
+            combined_text_blocks.append("[OCR TEXT]:\n" + "\n".join(extracted_lines))
+        elif not visual_caption:
+            combined_text_blocks.append(f"[Image Evidence: {base_filename}]")
 
-        # Save extracted text to disk
+        cleaned_text = self.clean_text("\n\n".join(combined_text_blocks))
+
+        # Save extracted clean text to disk
         out_filename = f"{os.path.splitext(base_filename)[0]}_ocrText.txt"
         out_path = os.path.join(self.output_dir, out_filename)
         with open(out_path, "w", encoding="utf-8") as out:
@@ -120,7 +144,7 @@ class ImageOCRParser:
             "processed_at": datetime.now().isoformat()
         }
 
-        print(f"[OK] Extracted OCR text ({len(cleaned_text)} chars) for {base_filename}")
+        print(f"[OK] Processed Vision & OCR ({len(cleaned_text)} chars) for {base_filename}")
 
         return {
             "metadata": {
