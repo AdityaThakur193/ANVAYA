@@ -15,10 +15,44 @@ Designed specifically for secure, air-gapped environments with **zero internet c
 
 ---
 
-## ✨ Key Capabilities
+## 🛠️ Final Technology Stack
 
-* **🔒 100% Air-Gapped Execution**: Operates completely offline on local hardware with zero outbound cloud or network API calls.
-* **📄 Multi-Format Ingestion**: Extracts text and tables from `.pdf` and `.docx` documents, performs OCR on scanned handwritten notes and screenshots, and transcribes recorded audio wiretaps into timestamped text.
-* **🔍 Unified Cross-Modal Search**: Supports natural-language text queries, text-to-image matching, and image-to-text retrieval across all ingested file types.
-* **🤖 Grounded Local LLM Synthesis**: Generates accurate, source-anchored summaries using a local quantized LLM running directly on-device.
-* **🔗 Interactive Citation Navigation**: Displays numbered citations that allow users to jump directly to the cited PDF page number or play the exact millisecond audio timestamp snippet.
+* **Backend Engine**: Python 3.11 + FastAPI + Uvicorn
+* **Document Ingestion**: PyMuPDF (`fitz`) + Regex text normalization
+* **Image OCR Ingestion**: PaddleOCR / Tesseract 5 (Scanned notes & screenshots)
+* **Audio Ingestion**: `faster-whisper-tiny` (CTranslate2 INT8 millisecond speech-to-text)
+* **Vector Store**: Embedded ChromaDB (HNSW index) + `BAAI/bge-small-en-v1.5` embeddings (133MB ONNX)
+* **Hybrid Search**: Dense Cosine Similarity + BM25 Lexical Keyword Search (Reciprocal Rank Fusion RRF)
+* **Local Offline LLM**: `Llama-3.2-3B-Instruct.Q4_K_M.gguf` via `llama.cpp` (100% Zero Cloud)
+* **Frontend UI**: React 19 + TypeScript + Vite + Tailwind CSS
+* **Citation Navigation**: `pdfjs-dist` (PDF page highlight) + `wavesurfer.js` (Audio timestamp waveform player)
+
+---
+
+## 📁 Repository Folder Structure
+
+```
+ANVAYA/
+├── README.md                           # Project definition & Overview
+├── backend/                            # Python FastAPI Server Engine
+│   ├── app/
+│   │   ├── main.py                     # FastAPI entry point
+│   │   ├── api/                        # REST endpoints (/ingest, /query)
+│   │   └── services/                   # Data processing modules
+│   │       ├── pdf_parser.py           # PyMuPDF & Regex text cleaning parser
+│   │       ├── image_ocr.py            # PaddleOCR screenshot text extractor
+│   │       ├── audio_transcriber.py    # Whisper timestamp audio transcriber
+│   │       ├── vector_store.py         # ChromaDB + BM25 RRF hybrid index
+│   │       └── local_llm.py            # llama.cpp local quantized LLM engine
+│   └── requirements.txt                # Python backend dependencies
+├── frontend/                           # React 19 Analyst UI Console
+│   ├── src/
+│   │   ├── App.tsx                     # Master Analyst Console UI
+│   │   ├── components/                 # PDFViewer & AudioPlayer components
+│   │   └── services/                   # API client
+│   ├── index.html
+│   └── package.json
+└── data/                               # Local Storage & Vector Database
+    ├── processed_text/                 # Cleaned text outputs & metadata
+    └── chroma_db/                      # Persistent HNSW vector database
+```
