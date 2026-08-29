@@ -1,4 +1,4 @@
-THIS is KAUShiks branch
+This is kaushiks branch 
 
 # 🛡️ ANVAYA (अन्वय)
 ### Multimodal Offline Air-Gapped Intelligence RAG Platform
