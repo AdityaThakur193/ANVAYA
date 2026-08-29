@@ -1,6 +1,6 @@
 import os
 import shutil
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -14,6 +14,14 @@ app = FastAPI(
     description="100% Offline Intelligence Engine for NTRO (SIH25231 / SIH26154)",
     version="1.0.0"
 )
+
+# Real-time HTTP Request Terminal Logger Middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    print(f"\n--> [FASTAPI REQUEST] {request.method} {request.url.path}", flush=True)
+    response = await call_next(request)
+    print(f"<-- [FASTAPI RESPONSE] {response.status_code} {request.url.path}", flush=True)
+    return response
 
 # Enable CORS for Next.js / Vite React frontend
 app.add_middleware(
@@ -43,7 +51,7 @@ class QueryRequest(BaseModel):
 
 @app.get("/")
 def health_check():
-    print("[HTTP GET /] Root health check request received.", flush=True)
+    print("[ROOT CHECK] Health check ok", flush=True)
     return {
         "status": "online",
         "air_gapped": True,
@@ -55,7 +63,7 @@ def health_check():
 @app.get("/api/health/full")
 def full_system_diagnostics():
     """Automated System Integrity Diagnostic Endpoint."""
-    print("[HTTP GET /api/health/full] Full system integrity diagnostics requested.", flush=True)
+    print("[DIAGNOSTICS] Full system integrity diagnostics requested.", flush=True)
     status_report = {
         "api_gateway": "online",
         "air_gapped": True,
@@ -99,20 +107,20 @@ def full_system_diagnostics():
 @app.post("/api/ingest")
 async def ingest_evidence_file(file: UploadFile = File(...)):
     """Uploads and ingests a multimodal evidence file (.pdf, .png, .wav) into vector store."""
-    print(f"\n[HTTP POST /api/ingest] Incoming file upload: '{file.filename}'", flush=True)
+    print(f"[INGESTION RECEIVED] File: '{file.filename}'", flush=True)
     file_location = os.path.join(UPLOADS_DIR, file.filename)
     with open(file_location, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
     try:
-        print(f"[INGESTION START] Processing '{file.filename}' through MasterIngestor...", flush=True)
+        print(f"[PARSING FILE] Running MasterIngestor on '{file.filename}'...", flush=True)
         parsed_result = ingestor.process_file(file_location)
         chunks = parsed_result["chunks"]
         if chunks:
-            print(f"[INDEXING START] Adding {len(chunks)} chunks into ChromaDB & SQLite FTS5...", flush=True)
+            print(f"[VECTOR INDEXING] Adding {len(chunks)} chunks into ChromaDB & SQLite FTS5...", flush=True)
             vector_store.add_chunks(chunks)
 
-        print(f"[INGESTION COMPLETE] Successfully finished '{file.filename}'! Total chunks: {len(chunks)}", flush=True)
+        print(f"[INGESTION SUCCESS] '{file.filename}' indexed cleanly ({len(chunks)} chunks)!", flush=True)
         return {
             "status": "success",
             "file_name": file.filename,
@@ -122,26 +130,23 @@ async def ingest_evidence_file(file: UploadFile = File(...)):
             "total_chunks_indexed": len(chunks)
         }
     except Exception as e:
-        print(f"[ERROR /api/ingest] Ingestion failed for {file.filename}: {e}", flush=True)
+        print(f"[INGESTION ERROR] {file.filename}: {e}", flush=True)
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
 
 @app.post("/api/query")
 def query_intelligence_briefing(request: QueryRequest):
     """Executes hybrid RRF search and local LLM grounded intelligence synthesis."""
-    print(f"\n[HTTP POST /api/query] Incoming Query: '{request.query}' (Task Type: {request.task_type})", flush=True)
+    print(f"[QUERY RECEIVED] '{request.query}' (Task: {request.task_type})", flush=True)
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
-    # 1. Execute Dense + Sparse Hybrid Search (RRF k=60)
-    print(f"[SEARCH START] Executing hybrid ChromaDB + SQLite FTS5 RRF search...", flush=True)
+    print(f"[HYBRID SEARCH] Executing ChromaDB + SQLite FTS5 RRF search...", flush=True)
     retrieved_chunks = vector_store.hybrid_search(request.query, top_k=request.top_k)
-    print(f"[SEARCH COMPLETE] Retrieved {len(retrieved_chunks)} top evidence chunks.", flush=True)
 
-    # 2. Synthesize grounded answer via Local LLM Engine
-    print(f"[LLM SYNTHESIS START] Dispatching to LocalLLMEngine...", flush=True)
+    print(f"[LLM SYNTHESIS] Generating response via LocalLLMEngine...", flush=True)
     synthesis = llm_engine.generate_response(request.query, retrieved_chunks, task_type=request.task_type)
-    print(f"[LLM SYNTHESIS COMPLETE] Answer generated with {len(synthesis['citations'])} citations.", flush=True)
 
+    print(f"[QUERY SUCCESS] Response generated with {len(synthesis['citations'])} citations!", flush=True)
     return {
         "query": request.query,
         "task_type": request.task_type,
