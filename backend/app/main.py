@@ -1,5 +1,13 @@
 import os
+import sys
 import shutil
+
+# Ensure backend root is always on sys.path regardless of execution directory
+_CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+_BACKEND_ROOT = os.path.dirname(_CURRENT_DIR)
+if _BACKEND_ROOT not in sys.path:
+    sys.path.insert(0, _BACKEND_ROOT)
+
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -35,7 +43,10 @@ app.add_middleware(
 # Initialize core services with robust path resolution
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
-DATA_DIR = os.path.join(PROJECT_ROOT, "backend", "data")
+ROOT_DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+BACKEND_DATA_DIR = os.path.join(PROJECT_ROOT, "backend", "data")
+DATA_DIR = ROOT_DATA_DIR if os.path.exists(ROOT_DATA_DIR) else BACKEND_DATA_DIR
+
 UPLOADS_DIR = os.path.join(DATA_DIR, "uploads")
 SAMPLE_CASE_DIR = os.path.join(DATA_DIR, "sample_case")
 PROCESSED_TEXT_DIR = os.path.join(DATA_DIR, "processed_text")

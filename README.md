@@ -69,11 +69,21 @@ flowchart TD
 * ⚡ **SimHash Deduplication**: 64-bit feature fingerprints drop duplicate files ($h \le 3$), saving 90% DB bloat.
 * 🔀 **Hybrid RRF Search**: Blends ChromaDB vectors + SQLite FTS5 sparse text with 5x Filename Score Boost.
 * 🟡 **Visual Yellow Marker Canvas**: Renders document page canvas with bright yellow marker highlights over query terms.
-* 🎙️ **Live Voice STT Mic**: Real-time browser speech-to-text input dictation.
+* 🎙️ **Live Voice STT Mic**: 100% offline speech-to-text microphone dictation via Faster-Whisper CPU engine.
 
 ---
 
-## 🚀 Quick Start
+## ⚡ 1-Click Launch (Windows Batch Script)
+
+Simply double-click **`run_anvaya.bat`** in the project root (or run via command prompt):
+```cmd
+run_anvaya.bat
+```
+This automatically verifies dependencies, starts the FastAPI backend (Port `8080`), starts the React Vite UI (Port `3000`), and launches the website in your default browser!
+
+---
+
+## 🛠️ Manual Startup (Terminal by Terminal)
 
 ### 1. Backend Setup
 ```bash

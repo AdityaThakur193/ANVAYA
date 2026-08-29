@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  API_BASE_URL,
   checkBackendHealth,
   submitIntelligenceQuery,
   uploadEvidenceFile,
@@ -11,13 +12,13 @@ import {
   RetrievedChunk,
   DocumentInfo
 } from './services/api';
-
-const API_BASE_URL = 'http://localhost:8080';
+import anvayaLogo from './assets/logo.jpeg';
 
 export default function App() {
   const [query, setQuery] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [response, setResponse] = useState<QueryResponse | null>(null);
+  const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   
   // 100% Offline Air-Gapped Microphone Speech Recording State
   const [isRecording, setIsRecording] = useState(false);
@@ -42,14 +43,21 @@ export default function App() {
   // Tab view inside Proof Panel: 'visual' vs 'text'
   const [proofTab, setProofTab] = useState<'visual' | 'text'>('visual');
 
+  const verifyHealth = async () => {
+    const health = await checkBackendHealth();
+    setBackendOnline(health !== null && health.status === 'online');
+  };
+
   const loadDocuments = async () => {
     const docs = await fetchIngestedDocuments();
     setDocuments(docs);
   };
 
   useEffect(() => {
-    checkBackendHealth();
+    verifyHealth();
     loadDocuments();
+    const interval = setInterval(verifyHealth, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   const toggleMicRecording = async () => {
@@ -293,10 +301,33 @@ export default function App() {
       {/* Top Header Bar */}
       <header className="border-b border-slate-800 px-6 py-4 flex justify-between items-center bg-slate-900/60 backdrop-blur-md sticky top-0 z-50 shadow-md">
         <div className="flex items-center space-x-3">
-          <h1 className="text-xl font-extrabold tracking-wider text-emerald-400">🛡️ ANVAYA</h1>
+          <div className="flex items-center gap-2.5">
+            <img
+              src={anvayaLogo}
+              alt="ANVAYA Logo"
+              className="w-9 h-9 rounded-full object-cover border border-emerald-500/40 shadow-sm bg-white p-0.5"
+            />
+            <h1 className="text-xl font-extrabold tracking-wider text-emerald-400">ANVAYA</h1>
+          </div>
           <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800">
             AIR-GAPPED (100% OFFLINE)
           </span>
+          {backendOnline === true ? (
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 flex items-center gap-1.5 shadow-sm">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              Backend Online (Port 8080)
+            </span>
+          ) : backendOnline === false ? (
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-rose-950/80 text-rose-300 border border-rose-800 flex items-center gap-1.5 shadow-sm">
+              <span className="w-2 h-2 rounded-full bg-rose-400"></span>
+              Backend Offline (Port 8080)
+            </span>
+          ) : (
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-800 flex items-center gap-1.5 shadow-sm">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+              Connecting...
+            </span>
+          )}
         </div>
         <div className="text-xs font-medium text-slate-400 flex items-center gap-3">
           <span className="hidden sm:inline">SIH25231 • NTRO (PMO)</span>
@@ -377,8 +408,17 @@ export default function App() {
                   <div>{renderFormattedAnswer(response.answer)}</div>
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center h-full text-slate-500 text-center py-12 text-xs font-mono space-y-4">
-                  <p>Upload evidence files above or enter a query below to generate grounded intelligence briefings with asset-aware citation badges.</p>
+                <div className="flex flex-col items-center justify-center h-full text-slate-500 text-center py-10 text-xs font-mono space-y-3.5">
+                  <div className="p-2 rounded-2xl bg-slate-900 border border-slate-800 shadow-inner flex items-center justify-center">
+                    <img
+                      src={anvayaLogo}
+                      alt="ANVAYA Seal"
+                      className="w-14 h-14 rounded-full object-cover bg-white p-0.5 border border-emerald-500/30 opacity-85 shadow-md"
+                    />
+                  </div>
+                  <p className="max-w-md text-slate-400">
+                    Upload evidence files above or enter a query below to generate grounded intelligence briefings with asset-aware citation badges.
+                  </p>
                   
                   {/* Sample Query Pills */}
                   {documents.length > 0 && (
