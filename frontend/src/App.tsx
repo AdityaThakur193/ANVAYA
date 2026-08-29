@@ -18,6 +18,10 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [response, setResponse] = useState<QueryResponse | null>(null);
   
+  // Voice Microphone Speech Recognition State
+  const [isListening, setIsListening] = useState(false);
+  const [recognition, setRecognition] = useState<any>(null);
+
   // Active Proof Viewer State (stores citation metadata + matching text chunk)
   const [activeProof, setActiveProof] = useState<{
     citation: Citation;
@@ -43,11 +47,69 @@ export default function App() {
   useEffect(() => {
     checkBackendHealth();
     loadDocuments();
+
+    // Initialize Web Speech API SpeechRecognition
+    const { SpeechRecognition, webkitSpeechRecognition } = window as any;
+    const SpeechRecognitionApi = SpeechRecognition || webkitSpeechRecognition;
+    if (SpeechRecognitionApi) {
+      const reco = new SpeechRecognitionApi();
+      reco.continuous = false;
+      reco.interimResults = true;
+      reco.lang = 'en-US';
+
+      reco.onresult = (event: any) => {
+        let currentTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          currentTranscript += event.results[i][0].transcript;
+        }
+        if (currentTranscript.trim()) {
+          setQuery(currentTranscript);
+        }
+      };
+
+      reco.onerror = (event: any) => {
+        console.warn('Speech recognition notice:', event.error);
+        setIsListening(false);
+      };
+
+      reco.onend = () => {
+        setIsListening(false);
+      };
+
+      setRecognition(reco);
+    }
   }, []);
+
+  const toggleListening = () => {
+    if (!recognition) {
+      alert('Voice speech recognition is not supported in this browser. Please use Chrome, Edge, or Brave.');
+      return;
+    }
+
+    if (isListening) {
+      try {
+        recognition.stop();
+      } catch (e) {}
+      setIsListening(false);
+    } else {
+      try {
+        recognition.start();
+        setIsListening(true);
+      } catch (e) {
+        console.error('Failed to start speech recognition:', e);
+      }
+    }
+  };
 
   const handleSynthesize = async (overrideQuery?: string) => {
     const targetQuery = overrideQuery || query;
     if (!targetQuery.trim() || isProcessing) return;
+
+    if (isListening && recognition) {
+      try { recognition.stop(); } catch (e) {}
+      setIsListening(false);
+    }
+
     setIsProcessing(true);
     setUploadStatus(null);
     setActiveProof(null);
@@ -139,32 +201,52 @@ export default function App() {
   };
 
   const renderFormattedAnswer = (text: string) => {
-    const citationRegex = /\[Source:\s*File="([^"]+)",\s*(Page|Time)=([^\]]+)\]/g;
+    const citationRegex = /\[Source:\s*(Audio|Image|Document|File)="([^"]+)"(?:,\s*(Page|Time)=([^\]]+))?\]/g;
     const parts = [];
     let lastIndex = 0;
     let match;
 
     while ((match = citationRegex.exec(text)) !== null) {
-      const [fullMatch, fileName, tagType, tagValue] = match;
+      const [fullMatch, assetKind, fileName, tagType, tagValue] = match;
       const matchIndex = match.index;
 
       if (matchIndex > lastIndex) {
         parts.push(text.substring(lastIndex, matchIndex));
       }
 
+      const isAudio = assetKind.toLowerCase() === 'audio' || fileName.endsWith('.wav') || fileName.endsWith('.mp3');
+      const isImage = assetKind.toLowerCase() === 'image' || fileName.endsWith('.png') || fileName.endsWith('.jpg') || fileName.endsWith('.jpeg');
+
+      const computedType = isAudio ? 'time' : 'page';
+      const computedValue = tagValue ? tagValue.trim() : (isAudio ? '0.0s' : '1');
+
       const citationObj: Citation = {
         file_name: fileName,
-        type: tagType.toLowerCase() as 'page' | 'time',
-        value: tagValue
+        type: computedType,
+        value: computedValue
       };
+
+      let badgeLabel = '';
+      let badgeStyle = '';
+
+      if (isAudio) {
+        badgeLabel = `🎵 Audio Intercept: ${fileName} (Time: ${computedValue})`;
+        badgeStyle = 'bg-amber-500/20 border-amber-500/40 text-amber-300 hover:bg-amber-500/40';
+      } else if (isImage) {
+        badgeLabel = `🖼️ Recon Image: ${fileName}`;
+        badgeStyle = 'bg-sky-500/20 border-sky-500/40 text-sky-300 hover:bg-sky-500/40';
+      } else {
+        badgeLabel = `📄 Classified Doc: ${fileName} (Page: ${computedValue})`;
+        badgeStyle = 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/40';
+      }
 
       parts.push(
         <button
           key={matchIndex}
           onClick={() => handleCitationClick(citationObj)}
-          className="inline-flex items-center gap-1 px-2 py-0.5 mx-1 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/40 font-mono text-xs font-semibold cursor-pointer transition shadow-sm hover:scale-105"
+          className={`inline-flex items-center gap-1 px-2.5 py-0.5 mx-1 rounded border font-mono text-xs font-semibold cursor-pointer transition shadow-sm hover:scale-105 ${badgeStyle}`}
         >
-          <span>📌 {fileName} ({tagType}: {tagValue})</span>
+          <span>📌 {badgeLabel}</span>
         </button>
       );
 
@@ -193,6 +275,14 @@ export default function App() {
     if (f.endsWith('.wav') || f.endsWith('.mp3')) return '🎵';
     if (f.endsWith('.png') || f.endsWith('.jpg') || f.endsWith('.jpeg')) return '🖼️';
     return '📁';
+  };
+
+  const getProofTitle = () => {
+    if (!activeProof) return '';
+    const fn = activeProof.citation.file_name.toLowerCase();
+    if (fn.endsWith('.wav') || fn.endsWith('.mp3')) return '🎵 AUDIO INTERCEPT PROOF';
+    if (fn.endsWith('.png') || fn.endsWith('.jpg') || fn.endsWith('.jpeg')) return '🖼️ RECONNAISSANCE IMAGE PROOF';
+    return '📄 CLASSIFIED DOCUMENT PROOF';
   };
 
   return (
@@ -246,7 +336,7 @@ export default function App() {
           <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 flex-1 flex flex-col shadow-lg">
             <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-3">
               <h2 className="text-sm font-bold tracking-wide text-slate-300 uppercase flex items-center gap-2">
-                <span>Grounded Intelligence Briefing</span>
+                <span>Multimodal Intelligence Briefing</span>
                 {documents.length > 0 && (
                   <span className="text-[10px] bg-slate-800 text-emerald-400 px-2 py-0.5 rounded font-mono font-semibold">
                     {documents.length} File{documents.length > 1 ? 's' : ''} Active
@@ -276,7 +366,7 @@ export default function App() {
               {isProcessing ? (
                 <div className="flex flex-col items-center justify-center h-full text-emerald-400 font-mono text-xs space-y-2 py-16">
                   <span className="animate-spin text-xl">⚡</span>
-                  <p className="font-bold">Performing hybrid vector search (ChromaDB + SQLite FTS5) & local LLM synthesis...</p>
+                  <p className="font-bold">Performing multimodal RRF search & local LLM synthesis...</p>
                   <span className="text-[10px] text-slate-500">Dispatching to Llama 3.1 8B Engine...</span>
                 </div>
               ) : response ? (
@@ -285,7 +375,7 @@ export default function App() {
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-slate-500 text-center py-12 text-xs font-mono space-y-4">
-                  <p>Upload evidence files above or enter a query below to generate grounded intelligence briefings with clickable proof.</p>
+                  <p>Upload evidence files above or enter a query below to generate grounded intelligence briefings with asset-aware citation badges.</p>
                   
                   {/* Sample Query Pills */}
                   {documents.length > 0 && (
@@ -312,25 +402,44 @@ export default function App() {
             </div>
           </div>
 
-          {/* Search Query Input Bar */}
-          <div className="flex gap-2 relative">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSynthesize()}
-              placeholder="Ask a plain-language query across evidence files..."
-              className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-emerald-500 text-slate-100 placeholder-slate-500 shadow-inner pr-8"
-            />
-            {query && (
+          {/* Search Query Input Bar with Live Voice Microphone STT */}
+          <div className="flex gap-2 relative items-center">
+            <div className="relative flex-1 flex items-center">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSynthesize()}
+                placeholder={isListening ? "🎙️ Listening... Speak into your microphone..." : "Ask a plain-language query across evidence files..."}
+                className={`w-full bg-slate-900 border ${isListening ? 'border-rose-500 ring-2 ring-rose-500/40 text-rose-200' : 'border-slate-800 focus:border-emerald-500 text-slate-100'} rounded-lg pl-4 pr-20 py-3 text-sm focus:outline-none placeholder-slate-500 shadow-inner`}
+              />
+
+              {/* Voice Speech Microphone Toggle Button */}
               <button
-                onClick={() => setQuery('')}
-                className="absolute right-36 top-3 text-slate-500 hover:text-slate-300 text-xs font-bold font-mono"
-                title="Clear query"
+                onClick={toggleListening}
+                type="button"
+                className={`absolute right-8 p-1.5 rounded-md transition flex items-center justify-center ${
+                  isListening
+                    ? 'bg-rose-600 text-white animate-pulse shadow-lg shadow-rose-500/50 scale-110'
+                    : 'text-slate-400 hover:text-emerald-400 hover:bg-slate-800'
+                }`}
+                title={isListening ? "Recording voice... Click to stop" : "Click to speak into microphone"}
               >
-                ✕
+                <span className="text-sm">🎙️</span>
               </button>
-            )}
+
+              {/* Clear Input Button */}
+              {query && (
+                <button
+                  onClick={() => setQuery('')}
+                  className="absolute right-2.5 text-slate-500 hover:text-slate-300 text-xs font-bold font-mono p-1"
+                  title="Clear query"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
             <button
               onClick={() => handleSynthesize()}
               disabled={isProcessing || !query.trim()}
@@ -357,7 +466,7 @@ export default function App() {
                       onClick={() => setProofTab('visual')}
                       className={`px-3 py-1 rounded transition font-bold ${proofTab === 'visual' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'text-slate-400 hover:text-slate-200'}`}
                     >
-                      🖼️ Visual Highlighted Canvas
+                      🖼️ Visual Canvas
                     </button>
                     <button
                       onClick={() => setProofTab('text')}
@@ -384,7 +493,7 @@ export default function App() {
                 {/* Proof Header Card */}
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                   <span className="font-bold text-amber-400 font-mono text-xs flex items-center gap-1.5">
-                    <span>📌 ACTIVE SOURCE PROOF</span>
+                    <span>📌 {getProofTitle()}</span>
                   </span>
                   <span className="text-xs bg-slate-800 px-2.5 py-0.5 rounded text-slate-200 font-mono font-semibold border border-slate-700">
                     {activeProof.citation.file_name}
@@ -394,7 +503,7 @@ export default function App() {
                 {/* Metadata Grid */}
                 <div className="grid grid-cols-2 gap-2 bg-slate-900 p-2.5 rounded-lg border border-slate-800 text-xs font-mono">
                   <div>
-                    <span className="text-slate-500 block">Target File</span>
+                    <span className="text-slate-500 block">Target Asset</span>
                     <span className="text-slate-200 font-semibold truncate block">{activeProof.citation.file_name}</span>
                   </div>
                   <div>
@@ -403,12 +512,12 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* VISUAL PAGE IMAGE DISPLAY WITH YELLOW MARKER HIGHLIGHTS */}
+                {/* VISUAL PAGE IMAGE DISPLAY */}
                 {proofTab === 'visual' && isVisualSupported ? (
                   <div className="bg-slate-900 border border-amber-500/40 p-2 rounded-lg space-y-2 shadow-inner flex flex-col items-center">
                     <div className="w-full flex items-center justify-between border-b border-slate-800/80 pb-1.5 px-1">
                       <span className="text-amber-400 font-mono text-xs font-bold uppercase flex items-center gap-1">
-                        <span>🖼️ YELLOW MARKER HIGHLIGHTED CANVAS</span>
+                        <span>🖼️ VERIFIED PAGE CANVAS PROOF</span>
                       </span>
                       <span className="text-emerald-400 font-mono text-[10px]">Page {pageNum} Rendered</span>
                     </div>
@@ -423,7 +532,7 @@ export default function App() {
                         }}
                       />
                       <div className="absolute top-2 right-2 bg-amber-500/90 text-slate-950 text-[10px] font-bold font-mono px-2 py-0.5 rounded shadow">
-                        YELLOW MARKER HIGHLIGHTED
+                        PAGE {pageNum} PROOF
                       </div>
                     </div>
                   </div>
@@ -447,13 +556,13 @@ export default function App() {
 
                 {/* Verification Confirmation Footer */}
                 <div className="bg-emerald-950/40 border border-emerald-800/60 p-2.5 rounded-lg text-xs text-emerald-300 font-mono flex items-center justify-between">
-                  <span>✓ Yellow marker highlight applied over query terms on page {pageNum}.</span>
+                  <span>✓ Proof target '{activeProof.citation.value}' verified in document index.</span>
                 </div>
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-slate-500 text-center text-xs font-mono space-y-2 py-16">
                 <span>🖼️</span>
-                <p>Click any generated citation button [📌 Source: File="...", Page=N] in the briefing to display the real visual document page image with yellow marker highlights.</p>
+                <p>Click any generated citation badge (🎵 Audio Intercept, 🖼️ Recon Image, 📄 Classified Doc) to display the real visual document canvas and proof chunk.</p>
               </div>
             )}
           </div>
