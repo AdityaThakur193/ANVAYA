@@ -11,7 +11,7 @@ from app.services.llm.local_llm import LocalLLMEngine
 
 app = FastAPI(
     title="ANVAYA — Air-Gapped Multimodal RAG API",
-    description="100% Offline Multi-Case Intelligence Engine for NTRO (SIH25231 / SIH26154)",
+    description="100% Offline Multi-Case Intelligence Engine for NTRO (SIH25231)",
     version="1.3.0"
 )
 
@@ -60,7 +60,7 @@ def health_check():
         "status": "online",
         "air_gapped": True,
         "system": "ANVAYA Multimodal Offline RAG Engine",
-        "sih_ps": "SIH25231 / SIH26154",
+        "sih_ps": "SIH25231",
         "agency": "NTRO (Prime Minister's Office)"
     }
 
