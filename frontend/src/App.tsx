@@ -296,7 +296,7 @@ export default function App() {
           </span>
         </div>
         <div className="text-xs font-medium text-slate-400 flex items-center gap-3">
-          <span className="hidden sm:inline">SIH25231 / SIH26154 • NTRO (PMO)</span>
+          <span className="hidden sm:inline">SIH25231 • NTRO (PMO)</span>
 
           <button
             onClick={handleResetDatabase}

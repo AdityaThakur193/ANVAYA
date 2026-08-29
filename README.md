@@ -3,7 +3,7 @@
 # 🛡️ PROJECT ANVAYA
 ### **100% Air-Gapped Multimodal RAG Engine for Defense & Intelligence Analysis**
 *Nodal Agency: National Technical Research Organisation (NTRO) / PMO*  
-*Problem Statement ID: **SIH25231 / SIH26154** | Category: Air-Gapped AI & Cyber Security*
+*Problem Statement ID: **SIH25231** | Category: Air-Gapped AI & Cyber Security*
 
 [![Air-Gapped Compliance](https://img.shields.io/badge/Air--Gapped-100%25%20Offline-emerald?style=for-the-badge&logo=shield)](https://github.com/AdityaThakur193/ANVAYA)
 [![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python)](https://python.org)
@@ -18,7 +18,7 @@
 
 ## 📌 Executive Summary
 
-**ANVAYA** (*Sanskrit for "Systemic Connection / Synthesis"*) is an enterprise-grade, **100% air-gapped multimodal intelligence analysis platform** built specifically for defense units, counter-intelligence teams, and security analysts. 
+**ANVAYA** (*Sanskrit for "Systemic Connection / Synthesis"*) is an enterprise-grade, **100% air-gapped multimodal intelligence analysis platform** built specifically for defense units, counter-intelligence teams, and security analysts under Problem Statement **SIH25231** for **NTRO**. 
 
 Operating **completely offline on standard 8GB/16GB RAM defense laptops** without external cloud dependencies or GPUs, ANVAYA ingests fragmented evidence (scanned PDF briefs, drone reconnaissance photos, audio wiretap recordings), eliminates duplicate files via 64-bit SimHash deduplication, executes hybrid dense/sparse RRF vector search, and synthesizes grounded briefings anchored with visual yellow marker page canvas proof.
 
@@ -159,11 +159,6 @@ Pre-loaded demo case files are available inside **`data/sample_case/`**:
 3. **`03_DRONE_SURVEILLANCE_SHOT.png`**: High-res drone reconnaissance photo.
 4. **`04_SUSPECT_DOSSIER_CONFIDENTIAL.pdf`**: Suspect profile dossier.
 
-### Sample Test Queries:
-* **Audio Timestamp Search**: `"What timestamp mentioned Harvard List No 1 in the wiretap?"` $\rightarrow$ Returns timestamp **`5.81s - 15.50s`** with clickable audio pill.
-* **PERT Schedule Search**: `"What is the critical path duration and location of Operation Vajra?"` $\rightarrow$ Returns **Visakhapatnam Dockyard**, **10 Days** PERT schedule.
-* **Suspect Dossier Search**: `"whose name is written in the resume"` $\rightarrow$ Returns **`Aditya Thakur`** with zero hallucination.
-
 ---
 
 ## 🔌 API Reference Gateway
@@ -180,57 +175,26 @@ Pre-loaded demo case files are available inside **`data/sample_case/`**:
 
 ---
 
-## 📁 Repository Directory Structure
+## 🏆 Team & Core Contributors Matrix
 
-```text
-ANVAYA/
-├── backend/
-│   ├── app/
-│   │   ├── main.py                     # FastAPI REST API Gateway & Logging Middleware
-│   │   └── services/
-│   │       ├── ingestion/
-│   │       │   ├── master_ingestor.py  # Ingestion Auto-Router & SimHash Deduplication
-│   │       │   ├── pdf_parser.py       # Spatial Block PDF Layout & Table Extractor
-│   │       │   ├── image_ocr_parser.py # EasyOCR & BLIP Scene Captioning
-│   │       │   └── audio_transcriber.py# Faster-Whisper INT8 VAD Speech Transcriber
-│   │       ├── vectorstore/
-│   │       │   └── vector_store.py     # ChromaDB + SQLite FTS5 RRF (k=60) Hybrid Search
-│   │       └── llm/
-│   │           └── local_llm.py        # Local LLM Task Dispatcher & Natural Phrasing Engine
-│   └── requirements.txt                # Python Dependencies
-├── frontend/
-│   ├── src/
-│   │   ├── App.tsx                     # Analyst Console UI, Voice STT Mic, & Proof Canvas
-│   │   └── services/api.ts             # Axios API Client Sockets
-│   ├── package.json
-│   └── vite.config.ts
-├── data/
-│   ├── sample_case/                    # Security Analyst Evaluation Demo Suite
-│   │   ├── 01_INTERCEPTED_WIRETAP_AUDIO.wav
-│   │   ├── 02_CLASSIFIED_INTELLIGENCE_REPORT.pdf
-│   │   ├── 03_DRONE_SURVEILLANCE_SHOT.png
-│   │   ├── 04_SUSPECT_DOSSIER_CONFIDENTIAL.pdf
-│   │   └── DEMO_WALKTHROUGH.md
-│   ├── ANVAYA_DEFENSE_MASTER_DOSSIER.md # Exhaustive Defense Pitch & Math Dossier
-│   └── ANVAYA_TEAM_TESTING_PROTOCOL.md # Step-by-Step QA Testing Manual
-├── .gitignore                          # Production Open-Source Ignore Rules
-└── README.md                           # Project Documentation
-```
+| Contributor | Core Role & Specialization | Key Technical Contributions |
+| :--- | :--- | :--- |
+| **Aditya Thakur** | **Team Lead & AI Systems Architect** | Architected multimodal RAG engine, ChromaDB + SQLite FTS5 RRF search, 64-bit SimHash deduplication, Ollama LLM integration, and FastAPI backend gateway. |
+| **Kaushik** | **Lead Frontend Engineer** | Engineered React Analyst Console, UI/UX layout design, dynamic multimodal citation badges, PyMuPDF proof viewer canvas, and Web Speech STT mic integration. |
+| **Sujal Sahu** | **Lead QA & Security Tester** | Spearheaded edge-case analysis, system break-point discovery, security penetration audits, VAD audio stress testing, and pipeline hardening. |
 
 ---
 
-## 🏆 Authors & Acknowledgments
+## 🏛️ Institutional Alignment
 
-* **Project Name**: ANVAYA (Air-Gapped Multimodal RAG Engine)
-* **Team Lead & Architect**: **Aditya Thakur** *(Lead / AI Systems Architect)*
 * **Institution**: GITAM Deemed University, Visakhapatnam, Andhra Pradesh, India
-* **Sponsoring Agency**: National Technical Research Organisation (NTRO) / Prime Minister's Office (PMO)
-* **Problem Statement Code**: SIH25231 / SIH26154
+* **Sponsoring Nodal Agency**: National Technical Research Organisation (NTRO) / Prime Minister's Office (PMO)
+* **Problem Statement ID**: **SIH25231**
 
 ---
 
 <div align="center">
 
-*Developed for Smart India Hackathon (SIH) • 100% Air-Gapped & Open-Source*
+*Developed for Smart India Hackathon (SIH 2025 / 2026) • 100% Air-Gapped & Open-Source*
 
 </div>
