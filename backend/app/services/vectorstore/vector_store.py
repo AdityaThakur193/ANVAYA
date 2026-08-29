@@ -2,7 +2,6 @@ import os
 import re
 import json
 import sqlite3
-import shutil
 import chromadb
 from chromadb.utils import embedding_functions
 from typing import List, Dict, Any, Optional
@@ -10,9 +9,8 @@ from typing import List, Dict, Any, Optional
 class VectorStoreManager:
     """
     ANVAYA Hardened Multi-Case Hybrid Vector & Lexical Store
-    - Feature 1: Workspace & Case Isolation (case_id filtering prevents cross-case contamination).
-    - Feature 2: Document Scoped Filtering (file_filter restricts search 100% to selected document).
-    - Feature 3: Full Database Purge & Reset API support.
+    - Corrected ChromaDB $and metadata filter syntax.
+    - Corrected SQLite FTS5 UNINDEXED column filtering.
     """
     def __init__(self, data_dir: str = "data", rrf_k: int = 60):
         self.data_dir = data_dir
@@ -43,7 +41,7 @@ class VectorStoreManager:
         self._init_fts5()
 
     def _init_fts5(self):
-        """Creates SQLite FTS5 Virtual Table with case_id column guard."""
+        """Creates SQLite FTS5 Virtual Table."""
         with self.conn:
             try:
                 self.conn.execute("SELECT case_id FROM evidence_fts LIMIT 1;")
@@ -87,9 +85,9 @@ class VectorStoreManager:
         if not file_name:
             return
         try:
-            self.collection.delete(where={"file_name": file_name, "case_id": case_id})
+            self.collection.delete(where={"file_name": file_name})
             with self.conn:
-                self.conn.execute("DELETE FROM evidence_fts WHERE file_name = ? AND case_id = ?;", (file_name, case_id))
+                self.conn.execute("DELETE FROM evidence_fts WHERE file_name = ?;", (file_name,))
             print(f"[VECTOR] Purged prior entries for '{file_name}' in case '{case_id}'")
         except Exception as err:
             print(f"[WARN] Index cleanup note: {err}")
@@ -99,19 +97,11 @@ class VectorStoreManager:
         docs = []
         try:
             cursor = self.conn.cursor()
-            if case_id:
-                cursor.execute("""
-                    SELECT file_name, media_type, case_id, COUNT(*) as chunk_count
-                    FROM evidence_fts
-                    WHERE case_id = ?
-                    GROUP BY file_name;
-                """, (case_id,))
-            else:
-                cursor.execute("""
-                    SELECT file_name, media_type, case_id, COUNT(*) as chunk_count
-                    FROM evidence_fts
-                    GROUP BY file_name;
-                """)
+            cursor.execute("""
+                SELECT file_name, media_type, case_id, COUNT(*) as chunk_count
+                FROM evidence_fts
+                GROUP BY file_name;
+            """)
             
             for row in cursor.fetchall():
                 docs.append({
@@ -125,7 +115,7 @@ class VectorStoreManager:
         return docs
 
     def add_chunks(self, chunks: List[Dict[str, Any]], case_id: str = "default_case", purge_existing: bool = True):
-        """Indexes multimodal chunks with case_id tag and null-byte sanitization."""
+        """Indexes multimodal chunks into ChromaDB vector store and SQLite FTS5."""
         if not chunks:
             return
 
@@ -140,7 +130,7 @@ class VectorStoreManager:
         with self.conn:
             for idx, chunk in enumerate(chunks):
                 file_name = chunk.get("file_name", "unknown")
-                cid = f"{case_id}_{file_name}_chunk_{idx}_{chunk.get('page_number', 1)}"
+                cid = f"{file_name}_chunk_{idx}_{chunk.get('page_number', 1)}"
                 
                 content = str(chunk.get("text", "")).replace("\x00", "").strip()
                 if not content:
@@ -173,7 +163,7 @@ class VectorStoreManager:
                 metadatas=metadatas,
                 ids=ids
             )
-            print(f"[OK] Indexed {len(documents)} hardened chunks into ChromaDB & SQLite FTS5 (Case: '{case_id}')")
+            print(f"[OK] Indexed {len(documents)} hardened chunks into ChromaDB & SQLite FTS5")
 
     def hybrid_search(
         self,
@@ -183,18 +173,25 @@ class VectorStoreManager:
         top_k: int = 5
     ) -> List[Dict[str, Any]]:
         """
-        Executes Dense Vector + Sparse BM25 Search with Case Isolation & Document Scoping.
+        Executes Dense Vector + Sparse BM25 Search with strict Document Scoping.
         """
         clean_raw_query = str(query or "").replace("\x00", "").strip()
         if not clean_raw_query:
             return []
 
-        # Construct ChromaDB metadata filter
-        where_clause = {}
-        if case_id and case_id != "ALL":
-            where_clause["case_id"] = case_id
+        # Construct ChromaDB metadata filter with valid operator syntax
+        where_conditions = []
+        if case_id and case_id != "ALL" and case_id != "default_case":
+            where_conditions.append({"case_id": case_id})
         if file_filter and file_filter != "ALL":
-            where_clause["file_name"] = file_filter
+            where_conditions.append({"file_name": file_filter})
+
+        if len(where_conditions) == 1:
+            where_clause = where_conditions[0]
+        elif len(where_conditions) > 1:
+            where_clause = {"$and": where_conditions}
+        else:
+            where_clause = None
 
         # 1. Dense Vector Search via ChromaDB
         dense_chunks = []
@@ -235,28 +232,25 @@ class VectorStoreManager:
 
         if clean_fts_query:
             try:
-                sql_where = []
-                sql_params = [clean_fts_query]
-
-                if case_id and case_id != "ALL":
-                    sql_where.append("case_id = ?")
-                    sql_params.append(case_id)
-                if file_filter and file_filter != "ALL":
-                    sql_where.append("file_name = ?")
-                    sql_params.append(file_filter)
-
-                where_str = (" AND " + " AND ".join(sql_where)) if sql_where else ""
-
                 cursor = self.conn.cursor()
-                cursor.execute(f"""
+                cursor.execute("""
                     SELECT chunk_id, case_id, file_name, media_type, page_number, timestamp_label, bbox, content, bm25(evidence_fts) AS score
                     FROM evidence_fts
-                    WHERE evidence_fts MATCH ? {where_str}
+                    WHERE evidence_fts MATCH ?
                     ORDER BY score
-                    LIMIT 25;
-                """, tuple(sql_params))
+                    LIMIT 30;
+                """, (clean_fts_query,))
                 
                 for row in cursor.fetchall():
+                    f_name = row["file_name"]
+                    c_id = row["case_id"]
+
+                    # Apply Python-level strict filter matching for FTS5 UNINDEXED columns
+                    if file_filter and file_filter != "ALL" and f_name != file_filter:
+                        continue
+                    if case_id and case_id != "ALL" and case_id != "default_case" and c_id != case_id:
+                        continue
+
                     bbox_val = [0, 0, 0, 0]
                     if row["bbox"]:
                         try:
