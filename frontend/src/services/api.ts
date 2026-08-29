@@ -84,3 +84,15 @@ export async function uploadEvidenceFile(file: File, caseId: string = 'default_c
   });
   return res.data;
 }
+
+export async function transcribeVoiceAudio(audioBlob: Blob): Promise<{ transcript: string }> {
+  const formData = new FormData();
+  formData.append('file', audioBlob, 'mic_recording.webm');
+
+  const res = await axios.post(`${API_BASE_URL}/api/voice_query`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+  return res.data;
+}
