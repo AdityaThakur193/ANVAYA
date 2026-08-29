@@ -1,6 +1,6 @@
 import os
 import shutil
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -12,7 +12,7 @@ from app.services.llm.local_llm import LocalLLMEngine
 app = FastAPI(
     title="ANVAYA — Air-Gapped Multimodal RAG API",
     description="100% Offline Multi-Case Intelligence Engine for NTRO (SIH25231 / SIH26154)",
-    version="1.1.0"
+    version="1.3.0"
 )
 
 # Real-time HTTP Request Terminal Logger Middleware
@@ -32,8 +32,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize core services
-DATA_DIR = "data"
+# Initialize core services with robust path resolution
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
+DATA_DIR = os.path.join(PROJECT_ROOT, "backend", "data")
 UPLOADS_DIR = os.path.join(DATA_DIR, "uploads")
 SAMPLE_CASE_DIR = os.path.join(DATA_DIR, "sample_case")
 PROCESSED_TEXT_DIR = os.path.join(DATA_DIR, "processed_text")
@@ -112,6 +114,55 @@ def get_documents(case_id: Optional[str] = None):
     docs = vector_store.get_indexed_documents(case_id=case_id)
     return {"documents": docs}
 
+@app.get("/api/document/page_image")
+def get_document_page_image(file_name: str, page_number: int = 1, highlight_text: Optional[str] = None):
+    """Renders high-res visual PNG page image with bright yellow text marker highlights!"""
+    file_location = os.path.join(UPLOADS_DIR, file_name)
+    if not os.path.exists(file_location):
+        alt_path1 = os.path.join(PROJECT_ROOT, "backend", "data", "uploads", file_name)
+        alt_path2 = os.path.join(PROJECT_ROOT, "data", "uploads", file_name)
+        if os.path.exists(alt_path1):
+            file_location = alt_path1
+        elif os.path.exists(alt_path2):
+            file_location = alt_path2
+        else:
+            raise HTTPException(status_code=404, detail=f"File '{file_name}' not found.")
+
+    fname_lower = file_name.lower()
+
+    # 1. Handle PDF page rendering via PyMuPDF (fitz) with visual marker highlighting
+    if fname_lower.endswith(".pdf"):
+        try:
+            import fitz
+            doc = fitz.open(file_location)
+            page_idx = max(0, min(page_number - 1, len(doc) - 1))
+            page = doc.load_page(page_idx)
+
+            # Perform visual text marker highlighting if highlight_text is specified
+            if highlight_text and highlight_text.strip():
+                clean_terms = [t.strip() for t in highlight_text.split() if len(t.strip()) > 2]
+                for term in clean_terms[:5]:
+                    quads = page.search_for(term)
+                    if quads:
+                        for q in quads:
+                            annot = page.add_highlight_annot(q)
+                            annot.set_colors(stroke=(1.0, 0.85, 0.0))  # Bright Amber Yellow Highlight Marker
+                            annot.update()
+
+            pix = page.get_pixmap(dpi=150)
+            img_bytes = pix.tobytes("png")
+            return Response(content=img_bytes, media_type="image/png")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"PDF rendering error: {str(e)}")
+
+    # 2. Handle Image files (.png, .jpg, .jpeg)
+    elif fname_lower.endswith((".png", ".jpg", ".jpeg")):
+        with open(file_location, "rb") as f:
+            return Response(content=f.read(), media_type="image/png")
+
+    else:
+        raise HTTPException(status_code=400, detail="Visual page rendering supported for PDF and Image files.")
+
 @app.delete("/api/reset")
 def reset_all_data():
     """Wipes 100% of all vector databases, FTS indexes, and uploaded files."""
@@ -119,11 +170,12 @@ def reset_all_data():
     vector_store.purge_all_data()
 
     # Clear uploads folder
-    for f in os.listdir(UPLOADS_DIR):
-        if f != ".gitkeep":
-            p = os.path.join(UPLOADS_DIR, f)
-            if os.path.isfile(p):
-                os.remove(p)
+    if os.path.exists(UPLOADS_DIR):
+        for f in os.listdir(UPLOADS_DIR):
+            if f != ".gitkeep":
+                p = os.path.join(UPLOADS_DIR, f)
+                if os.path.isfile(p):
+                    os.remove(p)
 
     return {"status": "success", "message": "All vector databases, FTS indexes, and uploaded files cleared cleanly."}
 

@@ -11,6 +11,8 @@ import {
   DocumentInfo
 } from './services/api';
 
+const API_BASE_URL = 'http://localhost:8080';
+
 export default function App() {
   const [query, setQuery] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -30,6 +32,9 @@ export default function App() {
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
 
+  // Tab view inside Proof Panel: 'visual' vs 'text'
+  const [proofTab, setProofTab] = useState<'visual' | 'text'>('visual');
+
   const loadDocuments = async () => {
     const docs = await fetchIngestedDocuments();
     setDocuments(docs);
@@ -40,13 +45,14 @@ export default function App() {
     loadDocuments();
   }, []);
 
-  const handleSynthesize = async () => {
-    if (!query.trim()) return;
+  const handleSynthesize = async (overrideQuery?: string) => {
+    const targetQuery = overrideQuery || query;
+    if (!targetQuery.trim() || isProcessing) return;
     setIsProcessing(true);
     setUploadStatus(null);
     setActiveProof(null);
     try {
-      const data = await submitIntelligenceQuery(query, selectedFileFilter);
+      const data = await submitIntelligenceQuery(targetQuery, selectedFileFilter);
       setResponse(data);
 
       // Auto-activate the first citation proof if available
@@ -55,7 +61,7 @@ export default function App() {
       }
     } catch (err) {
       console.error('Query execution error:', err);
-      alert('Backend connection error. Make sure FastAPI backend server is running on http://localhost:8080');
+      alert('Backend connection error. Please start the FastAPI backend server (http://localhost:8080).');
     } finally {
       setIsProcessing(false);
     }
@@ -116,18 +122,20 @@ export default function App() {
   const handleCitationClick = (citation: Citation, chunks?: RetrievedChunk[]) => {
     const targetChunks = chunks || response?.retrieved_chunks || [];
     
-    // Find matching chunk by file_name and page/timestamp
     const match = targetChunks.find((c) => {
       if (c.file_name !== citation.file_name) return false;
       if (citation.type === 'page' && String(c.page_number) === String(citation.value)) return true;
       if (citation.type === 'time' && c.timestamp_label === citation.value) return true;
-      return true; // Fallback to first chunk matching filename
+      return true;
     });
 
     setActiveProof({
       citation,
       chunk: match
     });
+
+    const isVisual = citation.file_name.endsWith('.pdf') || citation.file_name.endsWith('.png') || citation.file_name.endsWith('.jpg') || citation.file_name.endsWith('.jpeg');
+    setProofTab(isVisual ? 'visual' : 'text');
   };
 
   const renderFormattedAnswer = (text: string) => {
@@ -154,7 +162,7 @@ export default function App() {
         <button
           key={matchIndex}
           onClick={() => handleCitationClick(citationObj)}
-          className="inline-flex items-center gap-1 px-2 py-0.5 mx-1 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/40 font-mono text-xs font-semibold cursor-pointer transition shadow-sm"
+          className="inline-flex items-center gap-1 px-2 py-0.5 mx-1 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/40 font-mono text-xs font-semibold cursor-pointer transition shadow-sm hover:scale-105"
         >
           <span>📌 {fileName} ({tagType}: {tagValue})</span>
         </button>
@@ -170,10 +178,27 @@ export default function App() {
     return parts;
   };
 
+  const isVisualSupported = activeProof?.citation.file_name.endsWith('.pdf') ||
+                            activeProof?.citation.file_name.endsWith('.png') ||
+                            activeProof?.citation.file_name.endsWith('.jpg') ||
+                            activeProof?.citation.file_name.endsWith('.jpeg');
+
+  const pageNum = activeProof?.citation.type === 'page' ? parseInt(activeProof.citation.value) || 1 : 1;
+  const highlightParam = query ? `&highlight_text=${encodeURIComponent(query)}` : '';
+  const pageImageUrl = activeProof ? `${API_BASE_URL}/api/document/page_image?file_name=${encodeURIComponent(activeProof.citation.file_name)}&page_number=${pageNum}${highlightParam}` : '';
+
+  const getDocumentIcon = (fileName: string) => {
+    const f = fileName.toLowerCase();
+    if (f.endsWith('.pdf')) return '📄';
+    if (f.endsWith('.wav') || f.endsWith('.mp3')) return '🎵';
+    if (f.endsWith('.png') || f.endsWith('.jpg') || f.endsWith('.jpeg')) return '🖼️';
+    return '📁';
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       {/* Top Header Bar */}
-      <header className="border-b border-slate-800 px-6 py-4 flex justify-between items-center bg-slate-900/60 backdrop-blur-md sticky top-0 z-50">
+      <header className="border-b border-slate-800 px-6 py-4 flex justify-between items-center bg-slate-900/60 backdrop-blur-md sticky top-0 z-50 shadow-md">
         <div className="flex items-center space-x-3">
           <h1 className="text-xl font-extrabold tracking-wider text-emerald-400">🛡️ ANVAYA</h1>
           <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800">
@@ -181,11 +206,12 @@ export default function App() {
           </span>
         </div>
         <div className="text-xs font-medium text-slate-400 flex items-center gap-3">
-          <span>SIH25231 / SIH26154 • NTRO (PMO)</span>
+          <span className="hidden sm:inline">SIH25231 / SIH26154 • NTRO (PMO)</span>
 
           <button
             onClick={handleResetDatabase}
-            className="bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 font-medium px-3 py-1.5 rounded text-xs transition flex items-center gap-1"
+            title="Wipe all vector & FTS database files"
+            className="bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 font-medium px-3 py-1.5 rounded text-xs transition flex items-center gap-1 shadow-sm"
           >
             <span>🧹 Clear DB</span>
           </button>
@@ -219,8 +245,13 @@ export default function App() {
         <div className="flex flex-col space-y-4">
           <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 flex-1 flex flex-col shadow-lg">
             <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-3">
-              <h2 className="text-sm font-bold tracking-wide text-slate-300 uppercase">
-                Grounded Intelligence Briefing
+              <h2 className="text-sm font-bold tracking-wide text-slate-300 uppercase flex items-center gap-2">
+                <span>Grounded Intelligence Briefing</span>
+                {documents.length > 0 && (
+                  <span className="text-[10px] bg-slate-800 text-emerald-400 px-2 py-0.5 rounded font-mono font-semibold">
+                    {documents.length} File{documents.length > 1 ? 's' : ''} Active
+                  </span>
+                )}
               </h2>
 
               {/* Document Scoped Filter Dropdown */}
@@ -229,12 +260,12 @@ export default function App() {
                 <select
                   value={selectedFileFilter}
                   onChange={(e) => setSelectedFileFilter(e.target.value)}
-                  className="bg-slate-950 border border-slate-800 text-emerald-400 text-xs rounded px-2.5 py-1 focus:outline-none focus:border-emerald-500 font-mono font-semibold"
+                  className="bg-slate-950 border border-slate-800 text-emerald-400 text-xs rounded px-2.5 py-1 focus:outline-none focus:border-emerald-500 font-mono font-semibold cursor-pointer max-w-[220px] truncate"
                 >
                   <option value="ALL">🌐 All Ingested Files ({documents.length})</option>
                   {documents.map((doc) => (
                     <option key={doc.file_name} value={doc.file_name}>
-                      📄 {doc.file_name} ({doc.chunk_count} chunks)
+                      {getDocumentIcon(doc.file_name)} {doc.file_name} ({doc.chunk_count} chunks)
                     </option>
                   ))}
                 </select>
@@ -243,35 +274,66 @@ export default function App() {
             
             <div className="flex-1 bg-slate-950/60 rounded-lg p-4 text-slate-300 text-sm overflow-y-auto font-normal leading-relaxed border border-slate-800/50 min-h-[340px]">
               {isProcessing ? (
-                <div className="flex flex-col items-center justify-center h-full text-emerald-400 font-mono text-xs space-y-2 py-12">
-                  <span className="animate-spin text-lg">⚡</span>
-                  <p>Performing hybrid vector search (ChromaDB + SQLite FTS5) & local LLM synthesis...</p>
+                <div className="flex flex-col items-center justify-center h-full text-emerald-400 font-mono text-xs space-y-2 py-16">
+                  <span className="animate-spin text-xl">⚡</span>
+                  <p className="font-bold">Performing hybrid vector search (ChromaDB + SQLite FTS5) & local LLM synthesis...</p>
+                  <span className="text-[10px] text-slate-500">Dispatching to Llama 3.1 8B Engine...</span>
                 </div>
               ) : response ? (
-                <div className="whitespace-pre-wrap leading-relaxed">
-                  {renderFormattedAnswer(response.answer)}
+                <div className="whitespace-pre-wrap leading-relaxed space-y-3">
+                  <div>{renderFormattedAnswer(response.answer)}</div>
                 </div>
               ) : (
-                <div className="text-slate-500 text-center py-16 text-xs font-mono">
-                  Upload evidence files above or enter a query below to generate grounded intelligence briefings with clickable proof.
+                <div className="flex flex-col items-center justify-center h-full text-slate-500 text-center py-12 text-xs font-mono space-y-4">
+                  <p>Upload evidence files above or enter a query below to generate grounded intelligence briefings with clickable proof.</p>
+                  
+                  {/* Sample Query Pills */}
+                  {documents.length > 0 && (
+                    <div className="space-y-2">
+                      <span className="text-[10px] uppercase tracking-wider text-slate-400 block font-bold">Suggested Quick Queries:</span>
+                      <div className="flex flex-wrap justify-center gap-2 max-w-md">
+                        <button
+                          onClick={() => { setQuery("whose name is written in the resume"); handleSynthesize("whose name is written in the resume"); }}
+                          className="bg-slate-900 hover:bg-slate-800 border border-slate-800 text-emerald-400 text-[11px] px-2.5 py-1 rounded transition"
+                        >
+                          "whose name is written in the resume"
+                        </button>
+                        <button
+                          onClick={() => { setQuery("what timestamp was harvard mentioned"); handleSynthesize("what timestamp was harvard mentioned"); }}
+                          className="bg-slate-900 hover:bg-slate-800 border border-slate-800 text-amber-300 text-[11px] px-2.5 py-1 rounded transition"
+                        >
+                          "what timestamp was harvard mentioned"
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           </div>
 
-          {/* Search Query Input */}
-          <div className="flex gap-2">
+          {/* Search Query Input Bar */}
+          <div className="flex gap-2 relative">
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSynthesize()}
               placeholder="Ask a plain-language query across evidence files..."
-              className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-emerald-500 text-slate-100 placeholder-slate-500 shadow-inner"
+              className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-emerald-500 text-slate-100 placeholder-slate-500 shadow-inner pr-8"
             />
+            {query && (
+              <button
+                onClick={() => setQuery('')}
+                className="absolute right-36 top-3 text-slate-500 hover:text-slate-300 text-xs font-bold font-mono"
+                title="Clear query"
+              >
+                ✕
+              </button>
+            )}
             <button
-              onClick={handleSynthesize}
-              disabled={isProcessing}
+              onClick={() => handleSynthesize()}
+              disabled={isProcessing || !query.trim()}
               className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-6 py-3 rounded-lg text-sm transition shadow-md flex items-center gap-2 disabled:opacity-50"
             >
               {isProcessing ? 'Synthesizing...' : 'Synthesize'}
@@ -279,28 +341,58 @@ export default function App() {
           </div>
         </div>
 
-        {/* Right Column: Dual Citation Proof Viewer Panel */}
+        {/* Right Column: Visual Page & Proof Viewer Panel */}
         <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 flex flex-col shadow-lg">
-          <h2 className="text-sm font-bold tracking-wide text-slate-300 mb-3 uppercase flex items-center justify-between border-b border-slate-800 pb-3">
-            <span>Interactive Source Citation Navigation</span>
-            <span className="text-xs text-emerald-400 font-mono">Verified Proof Viewer</span>
-          </h2>
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
+            <h2 className="text-sm font-bold tracking-wide text-slate-300 uppercase flex items-center gap-2">
+              <span>Interactive Source Citation Navigation</span>
+            </h2>
+
+            {/* Toggle Tabs: Visual Page Image vs Extracted Text */}
+            {activeProof && (
+              <div className="flex items-center space-x-2">
+                {isVisualSupported && (
+                  <div className="flex bg-slate-950 p-0.5 rounded border border-slate-800 text-xs font-mono">
+                    <button
+                      onClick={() => setProofTab('visual')}
+                      className={`px-3 py-1 rounded transition font-bold ${proofTab === 'visual' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'text-slate-400 hover:text-slate-200'}`}
+                    >
+                      🖼️ Visual Highlighted Canvas
+                    </button>
+                    <button
+                      onClick={() => setProofTab('text')}
+                      className={`px-3 py-1 rounded transition font-bold ${proofTab === 'text' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'text-slate-400 hover:text-slate-200'}`}
+                    >
+                      📄 Extracted Text
+                    </button>
+                  </div>
+                )}
+                <button
+                  onClick={() => setActiveProof(null)}
+                  className="text-slate-500 hover:text-slate-300 text-xs font-mono font-bold px-2 py-1 rounded bg-slate-950 border border-slate-800"
+                  title="Close active proof panel"
+                >
+                  ✕ Close
+                </button>
+              </div>
+            )}
+          </div>
           
-          <div className="flex-1 bg-slate-950/60 rounded-lg flex flex-col text-slate-300 text-sm border border-slate-800/50 p-5 overflow-y-auto min-h-[340px]">
+          <div className="flex-1 bg-slate-950/60 rounded-lg flex flex-col text-slate-300 text-sm border border-slate-800/50 p-4 overflow-y-auto min-h-[340px]">
             {activeProof ? (
-              <div className="w-full text-left space-y-4">
+              <div className="w-full text-left space-y-3">
                 {/* Proof Header Card */}
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <span className="font-bold text-amber-400 font-mono text-sm flex items-center gap-1.5">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <span className="font-bold text-amber-400 font-mono text-xs flex items-center gap-1.5">
                     <span>📌 ACTIVE SOURCE PROOF</span>
                   </span>
-                  <span className="text-xs bg-slate-800 px-2.5 py-1 rounded text-slate-200 font-mono font-semibold border border-slate-700">
+                  <span className="text-xs bg-slate-800 px-2.5 py-0.5 rounded text-slate-200 font-mono font-semibold border border-slate-700">
                     {activeProof.citation.file_name}
                   </span>
                 </div>
 
                 {/* Metadata Grid */}
-                <div className="grid grid-cols-2 gap-3 bg-slate-900 p-3.5 rounded-lg border border-slate-800 text-xs font-mono">
+                <div className="grid grid-cols-2 gap-2 bg-slate-900 p-2.5 rounded-lg border border-slate-800 text-xs font-mono">
                   <div>
                     <span className="text-slate-500 block">Target File</span>
                     <span className="text-slate-200 font-semibold truncate block">{activeProof.citation.file_name}</span>
@@ -311,31 +403,57 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Exact Extracted Proof Chunk Text Box */}
-                <div className="bg-slate-900 border border-emerald-500/40 p-4 rounded-lg space-y-2 shadow-inner">
-                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
-                    <span className="text-emerald-400 font-mono text-xs font-bold uppercase tracking-wider flex items-center gap-1">
-                      <span>✓ EXACT EXTRACTED EVIDENCE CONTENT</span>
-                    </span>
-                    {activeProof.chunk?.rrf_score && (
-                      <span className="text-slate-500 font-mono text-[10px]">RRF Relevance Score: {activeProof.chunk.rrf_score}</span>
-                    )}
-                  </div>
+                {/* VISUAL PAGE IMAGE DISPLAY WITH YELLOW MARKER HIGHLIGHTS */}
+                {proofTab === 'visual' && isVisualSupported ? (
+                  <div className="bg-slate-900 border border-amber-500/40 p-2 rounded-lg space-y-2 shadow-inner flex flex-col items-center">
+                    <div className="w-full flex items-center justify-between border-b border-slate-800/80 pb-1.5 px-1">
+                      <span className="text-amber-400 font-mono text-xs font-bold uppercase flex items-center gap-1">
+                        <span>🖼️ YELLOW MARKER HIGHLIGHTED CANVAS</span>
+                      </span>
+                      <span className="text-emerald-400 font-mono text-[10px]">Page {pageNum} Rendered</span>
+                    </div>
 
-                  <div className="bg-slate-950 p-3.5 rounded-md text-slate-200 leading-relaxed font-sans text-xs border border-slate-800/80 whitespace-pre-wrap max-h-[220px] overflow-y-auto">
-                    {activeProof.chunk ? activeProof.chunk.text : `Source text chunk for ${activeProof.citation.file_name} (${activeProof.citation.type}: ${activeProof.citation.value})`}
+                    <div className="relative border border-slate-800 rounded bg-slate-950 p-1 overflow-auto max-h-[300px] w-full flex justify-center">
+                      <img
+                        src={pageImageUrl}
+                        alt={`Proof page ${pageNum}`}
+                        className="rounded shadow-md max-w-full h-auto object-contain border border-amber-500/20"
+                        onError={(e) => {
+                          setProofTab('text');
+                        }}
+                      />
+                      <div className="absolute top-2 right-2 bg-amber-500/90 text-slate-950 text-[10px] font-bold font-mono px-2 py-0.5 rounded shadow">
+                        YELLOW MARKER HIGHLIGHTED
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  /* EXTRACTED EVIDENCE TEXT DISPLAY */
+                  <div className="bg-slate-900 border border-emerald-500/40 p-3.5 rounded-lg space-y-2 shadow-inner">
+                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                      <span className="text-emerald-400 font-mono text-xs font-bold uppercase tracking-wider flex items-center gap-1">
+                        <span>✓ EXACT EXTRACTED EVIDENCE CONTENT</span>
+                      </span>
+                      {activeProof.chunk?.rrf_score && (
+                        <span className="text-slate-500 font-mono text-[10px]">RRF Score: {activeProof.chunk.rrf_score}</span>
+                      )}
+                    </div>
+
+                    <div className="bg-slate-950 p-3.5 rounded-md text-slate-200 leading-relaxed font-sans text-xs border border-slate-800/80 whitespace-pre-wrap max-h-[220px] overflow-y-auto">
+                      {activeProof.chunk ? activeProof.chunk.text : `Source text chunk for ${activeProof.citation.file_name} (${activeProof.citation.type}: ${activeProof.citation.value})`}
+                    </div>
+                  </div>
+                )}
 
                 {/* Verification Confirmation Footer */}
-                <div className="bg-emerald-950/40 border border-emerald-800/60 p-3 rounded-lg text-xs text-emerald-300 font-mono flex items-center justify-between">
-                  <span>✓ Proof boundary target '{activeProof.citation.value}' verified in index.</span>
+                <div className="bg-emerald-950/40 border border-emerald-800/60 p-2.5 rounded-lg text-xs text-emerald-300 font-mono flex items-center justify-between">
+                  <span>✓ Yellow marker highlight applied over query terms on page {pageNum}.</span>
                 </div>
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-slate-500 text-center text-xs font-mono space-y-2 py-16">
-                <span>📌</span>
-                <p>Click any generated citation button [📌 Source: File="...", Page=N] in the briefing to display the exact extracted evidence content and proof chunk.</p>
+                <span>🖼️</span>
+                <p>Click any generated citation button [📌 Source: File="...", Page=N] in the briefing to display the real visual document page image with yellow marker highlights.</p>
               </div>
             )}
           </div>

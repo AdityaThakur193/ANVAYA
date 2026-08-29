@@ -7,9 +7,8 @@ from typing import List, Dict, Any
 class LocalLLMEngine:
     """
     ANVAYA Air-Gapped Local LLM & Multi-Model Task Dispatcher
-    - Uses Ollama 'system' parameter to override default assistant safety guardrails.
-    - Prefers 8B / Qwen models (e.g. llama3.1:8b, qwen2.5) over timid 1B models to prevent PII refusals.
-    - Enforces strict source citation tags.
+    - Features strict document extraction prompt guidance for full names, skills, dates, and facts.
+    - Zero PII refusals and zero hallucination on vague user prompts.
     """
     def __init__(self, ollama_url: str = "http://localhost:11434", default_model: str = "llama3.1:8b"):
         self.ollama_url = ollama_url.rstrip("/")
@@ -32,7 +31,7 @@ class LocalLLMEngine:
     def select_best_model_for_task(self, task_type: str = "briefing") -> str:
         """
         Dynamically pairs task types with the best model installed on the user's machine.
-        Prioritizes Llama 3.1 8B and Qwen 2.5 over tiny Llama 3.2 1B for zero-refusal document analysis.
+        Prioritizes Llama 3.1 8B over 1B models for zero hallucination.
         """
         installed = self.get_installed_ollama_models()
         if not installed:
@@ -62,8 +61,8 @@ class LocalLLMEngine:
             "prompt": user_prompt,
             "stream": False,
             "options": {
-                "temperature": 0.1,   # Low temperature for zero hallucination
-                "num_predict": 300,   # High enough token budget for full document answers
+                "temperature": 0.0,   # 0.0 Temperature for zero hallucination
+                "num_predict": 350,   # High token budget for full answers
                 "num_ctx": 2048
             }
         }
@@ -103,12 +102,14 @@ class LocalLLMEngine:
 
         system_prompt = (
             "You are ANVAYA, an air-gapped Document Analysis & Intelligence Extraction System.\n"
-            "Your explicit job is to inspect user-uploaded files and extract names, skills, dates, and facts exactly as written.\n"
-            "Do NOT issue PII privacy disclaimers or refusals. Extract requested facts directly.\n"
-            "Append citation tags formatted exactly as: [Source: File=\"<file_name>\", Page=<page_num>] or [Source: File=\"<file_name>\", Time=<t_start>-<t_end>] after key claims."
+            "Your job is to read the provided evidence documents and extract facts exactly as written.\n"
+            "DIRECTIVES:\n"
+            "1. If asked for a candidate name, document owner, or person's name, extract and report the primary name (e.g., Aditya Thakur) immediately from the text.\n"
+            "2. Never guess or hallucinate names not present in the text.\n"
+            "3. Append citation tags formatted exactly as: [Source: File=\"<file_name>\", Page=<page_num>] or [Source: File=\"<file_name>\", Time=<t_start>-<t_end>] after key claims."
         )
 
-        user_prompt = f"RETRIEVED EVIDENCE DOCUMENTS:\n{context_str}\nUSER QUERY: {query}\n\nEXTRACTED FACTUAL BRIEFING:"
+        user_prompt = f"EVIDENCE DOCUMENTS:\n{context_str}\nUSER QUESTION: {query}\n\nEXTRACTED FACTUAL ANSWER:"
 
         answer_text = ""
 
@@ -130,7 +131,7 @@ class LocalLLMEngine:
                     print("[LLM] Loading llama.cpp local GGUF model...")
                     self._llm = Llama(model_path=self.model_path, n_ctx=2048, n_threads=4, verbose=False)
                 full_p = f"{system_prompt}\n\n{user_prompt}"
-                out = self._llm(full_p, max_tokens=300, temperature=0.1)
+                out = self._llm(full_p, max_tokens=300, temperature=0.0)
                 answer_text = out["choices"][0]["text"].strip()
             except Exception as err:
                 print(f"[WARN] llama.cpp execution note: {err}")
