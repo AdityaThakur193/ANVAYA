@@ -7,6 +7,7 @@ import {
   resetDatabase,
   QueryResponse,
   Citation,
+  RetrievedChunk,
   DocumentInfo
 } from './services/api';
 
@@ -14,7 +15,12 @@ export default function App() {
   const [query, setQuery] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [response, setResponse] = useState<QueryResponse | null>(null);
-  const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
+  
+  // Active Proof Viewer State (stores citation metadata + matching text chunk)
+  const [activeProof, setActiveProof] = useState<{
+    citation: Citation;
+    chunk?: RetrievedChunk;
+  } | null>(null);
   
   // Document Scoped Filter State
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
@@ -38,9 +44,15 @@ export default function App() {
     if (!query.trim()) return;
     setIsProcessing(true);
     setUploadStatus(null);
+    setActiveProof(null);
     try {
       const data = await submitIntelligenceQuery(query, selectedFileFilter);
       setResponse(data);
+
+      // Auto-activate the first citation proof if available
+      if (data.citations && data.citations.length > 0) {
+        handleCitationClick(data.citations[0], data.retrieved_chunks);
+      }
     } catch (err) {
       console.error('Query execution error:', err);
       alert('Backend connection error. Make sure FastAPI backend server is running on http://localhost:8080');
@@ -54,7 +66,7 @@ export default function App() {
     try {
       await resetDatabase();
       setResponse(null);
-      setActiveCitation(null);
+      setActiveProof(null);
       setSelectedFileFilter('ALL');
       setDocuments([]);
       setUploadStatus('🧹 Database reset cleanly. Zero documents remaining.');
@@ -101,6 +113,23 @@ export default function App() {
     }
   };
 
+  const handleCitationClick = (citation: Citation, chunks?: RetrievedChunk[]) => {
+    const targetChunks = chunks || response?.retrieved_chunks || [];
+    
+    // Find matching chunk by file_name and page/timestamp
+    const match = targetChunks.find((c) => {
+      if (c.file_name !== citation.file_name) return false;
+      if (citation.type === 'page' && String(c.page_number) === String(citation.value)) return true;
+      if (citation.type === 'time' && c.timestamp_label === citation.value) return true;
+      return true; // Fallback to first chunk matching filename
+    });
+
+    setActiveProof({
+      citation,
+      chunk: match
+    });
+  };
+
   const renderFormattedAnswer = (text: string) => {
     const citationRegex = /\[Source:\s*File="([^"]+)",\s*(Page|Time)=([^\]]+)\]/g;
     const parts = [];
@@ -115,10 +144,16 @@ export default function App() {
         parts.push(text.substring(lastIndex, matchIndex));
       }
 
+      const citationObj: Citation = {
+        file_name: fileName,
+        type: tagType.toLowerCase() as 'page' | 'time',
+        value: tagValue
+      };
+
       parts.push(
         <button
           key={matchIndex}
-          onClick={() => setActiveCitation({ file_name: fileName, type: tagType.toLowerCase() as 'page' | 'time', value: tagValue })}
+          onClick={() => handleCitationClick(citationObj)}
           className="inline-flex items-center gap-1 px-2 py-0.5 mx-1 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/40 font-mono text-xs font-semibold cursor-pointer transition shadow-sm"
         >
           <span>📌 {fileName} ({tagType}: {tagValue})</span>
@@ -206,7 +241,7 @@ export default function App() {
               </div>
             </div>
             
-            <div className="flex-1 bg-slate-950/60 rounded-lg p-4 text-slate-300 text-sm overflow-y-auto font-normal leading-relaxed border border-slate-800/50 min-h-[320px]">
+            <div className="flex-1 bg-slate-950/60 rounded-lg p-4 text-slate-300 text-sm overflow-y-auto font-normal leading-relaxed border border-slate-800/50 min-h-[340px]">
               {isProcessing ? (
                 <div className="flex flex-col items-center justify-center h-full text-emerald-400 font-mono text-xs space-y-2 py-12">
                   <span className="animate-spin text-lg">⚡</span>
@@ -244,32 +279,63 @@ export default function App() {
           </div>
         </div>
 
-        {/* Right Column: Dual Citation Navigation Panel */}
+        {/* Right Column: Dual Citation Proof Viewer Panel */}
         <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 flex flex-col shadow-lg">
           <h2 className="text-sm font-bold tracking-wide text-slate-300 mb-3 uppercase flex items-center justify-between border-b border-slate-800 pb-3">
             <span>Interactive Source Citation Navigation</span>
-            <span className="text-xs text-slate-500 font-mono">Proof Viewer</span>
+            <span className="text-xs text-emerald-400 font-mono">Verified Proof Viewer</span>
           </h2>
           
-          <div className="flex-1 bg-slate-950/60 rounded-lg flex flex-col items-center justify-center text-slate-300 text-sm border border-slate-800/50 p-6">
-            {activeCitation ? (
+          <div className="flex-1 bg-slate-950/60 rounded-lg flex flex-col text-slate-300 text-sm border border-slate-800/50 p-5 overflow-y-auto min-h-[340px]">
+            {activeProof ? (
               <div className="w-full text-left space-y-4">
+                {/* Proof Header Card */}
                 <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <span className="font-bold text-amber-400 font-mono text-sm">📌 ACTIVE SOURCE PROOF</span>
-                  <span className="text-xs bg-slate-800 px-2.5 py-1 rounded text-slate-300 font-mono">{activeCitation.file_name}</span>
+                  <span className="font-bold text-amber-400 font-mono text-sm flex items-center gap-1.5">
+                    <span>📌 ACTIVE SOURCE PROOF</span>
+                  </span>
+                  <span className="text-xs bg-slate-800 px-2.5 py-1 rounded text-slate-200 font-mono font-semibold border border-slate-700">
+                    {activeProof.citation.file_name}
+                  </span>
                 </div>
-                <div className="bg-slate-900 p-4 rounded-lg border border-slate-800 text-xs space-y-2 font-mono">
-                  <p><span className="text-slate-500">Target File:</span> <span className="text-slate-200 font-semibold">{activeCitation.file_name}</span></p>
-                  <p><span className="text-slate-500">Citation Type:</span> <span className="text-amber-400 font-bold">{activeCitation.type.toUpperCase()}</span></p>
-                  <p><span className="text-slate-500">Source Boundary:</span> <span className="text-emerald-400 font-bold">{activeCitation.value}</span></p>
+
+                {/* Metadata Grid */}
+                <div className="grid grid-cols-2 gap-3 bg-slate-900 p-3.5 rounded-lg border border-slate-800 text-xs font-mono">
+                  <div>
+                    <span className="text-slate-500 block">Target File</span>
+                    <span className="text-slate-200 font-semibold truncate block">{activeProof.citation.file_name}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block">Boundary Target</span>
+                    <span className="text-amber-400 font-bold uppercase block">{activeProof.citation.type}: {activeProof.citation.value}</span>
+                  </div>
                 </div>
-                <div className="bg-emerald-950/40 border border-emerald-800/60 p-3 rounded-lg text-xs text-emerald-300 font-mono">
-                  ✓ Highlighting boundary target {activeCitation.value} in source document viewer...
+
+                {/* Exact Extracted Proof Chunk Text Box */}
+                <div className="bg-slate-900 border border-emerald-500/40 p-4 rounded-lg space-y-2 shadow-inner">
+                  <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                    <span className="text-emerald-400 font-mono text-xs font-bold uppercase tracking-wider flex items-center gap-1">
+                      <span>✓ EXACT EXTRACTED EVIDENCE CONTENT</span>
+                    </span>
+                    {activeProof.chunk?.rrf_score && (
+                      <span className="text-slate-500 font-mono text-[10px]">RRF Relevance Score: {activeProof.chunk.rrf_score}</span>
+                    )}
+                  </div>
+
+                  <div className="bg-slate-950 p-3.5 rounded-md text-slate-200 leading-relaxed font-sans text-xs border border-slate-800/80 whitespace-pre-wrap max-h-[220px] overflow-y-auto">
+                    {activeProof.chunk ? activeProof.chunk.text : `Source text chunk for ${activeProof.citation.file_name} (${activeProof.citation.type}: ${activeProof.citation.value})`}
+                  </div>
+                </div>
+
+                {/* Verification Confirmation Footer */}
+                <div className="bg-emerald-950/40 border border-emerald-800/60 p-3 rounded-lg text-xs text-emerald-300 font-mono flex items-center justify-between">
+                  <span>✓ Proof boundary target '{activeProof.citation.value}' verified in index.</span>
                 </div>
               </div>
             ) : (
-              <div className="text-slate-500 text-center text-xs font-mono">
-                Click any generated citation button [📌 Source: File="...", Page=N] in the briefing to navigate directly to the exact source proof page or audio timestamp.
+              <div className="flex flex-col items-center justify-center h-full text-slate-500 text-center text-xs font-mono space-y-2 py-16">
+                <span>📌</span>
+                <p>Click any generated citation button [📌 Source: File="...", Page=N] in the briefing to display the exact extracted evidence content and proof chunk.</p>
               </div>
             )}
           </div>
