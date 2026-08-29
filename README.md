@@ -68,23 +68,26 @@ ANVAYA/
 
 ## 🚀 Quick Start Guide
 
-### 1. Start the FastAPI Backend Engine:
-```bash
-# Navigate to project root
-cd e:\SIH
+### ⚡ 1-Click Launch (Windows Batch Script):
+Simply double-click **`run_anvaya.bat`** in the project root (or run via command prompt):
+```cmd
+run_anvaya.bat
+```
+This automatically verifies dependencies, starts the FastAPI backend (Port `8080`), starts the React Vite UI (Port `3000`), and launches the website in your default browser!
 
-# Run FastAPI backend server
-python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+---
+
+### 🛠️ Manual Startup (Terminal by Terminal):
+
+#### Terminal 1: Start FastAPI Backend Engine (Port 8080)
+```bash
+python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
-### 2. Start the Vite React Frontend UI:
+#### Terminal 2: Start Vite React Analyst UI (Port 3000)
 ```bash
-# Open a second terminal window
-cd e:\SIH\frontend
-
-# Install dependencies & run Vite dev server
-npm install
+cd frontend
 npm run dev
 ```
 
-Open `http://localhost:5173` in your browser to start using ANVAYA!
+Open **`http://localhost:3000`** in your browser to start using ANVAYA!
