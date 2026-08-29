@@ -7,7 +7,7 @@
 
 ---
 
-## 📌 About The Project
+## 📌About The Project
 
 **ANVAYA** (Sanskrit: *अन्वय* — meaning *Synthesis, Connection & Grounded Relation*) is an enterprise-grade, 100% offline, air-gapped **Multimodal Retrieval-Augmented Generation (RAG)** platform built for the **National Technical Research Organisation (NTRO)** under **Smart India Hackathon (`SIH25231`)**.
 
