@@ -11,6 +11,7 @@ import {
   RetrievedChunk,
   DocumentInfo
 } from './services/api';
+import anvayaLogo from './assets/logo.jpeg';
 
 export default function App() {
   const [query, setQuery] = useState('');
@@ -298,7 +299,14 @@ export default function App() {
       {/* Top Header Bar */}
       <header className="border-b border-slate-800 px-6 py-4 flex justify-between items-center bg-slate-900/60 backdrop-blur-md sticky top-0 z-50 shadow-md">
         <div className="flex items-center space-x-3">
-          <h1 className="text-xl font-extrabold tracking-wider text-emerald-400">🛡️ ANVAYA</h1>
+          <div className="flex items-center gap-2.5">
+            <img
+              src={anvayaLogo}
+              alt="ANVAYA Logo"
+              className="w-9 h-9 rounded-full object-cover border border-emerald-500/40 shadow-sm bg-white p-0.5"
+            />
+            <h1 className="text-xl font-extrabold tracking-wider text-emerald-400">ANVAYA</h1>
+          </div>
           <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800">
             AIR-GAPPED (100% OFFLINE)
           </span>
@@ -398,8 +406,17 @@ export default function App() {
                   <div>{renderFormattedAnswer(response.answer)}</div>
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center h-full text-slate-500 text-center py-12 text-xs font-mono space-y-4">
-                  <p>Upload evidence files above or enter a query below to generate grounded intelligence briefings with asset-aware citation badges.</p>
+                <div className="flex flex-col items-center justify-center h-full text-slate-500 text-center py-10 text-xs font-mono space-y-3.5">
+                  <div className="p-2 rounded-2xl bg-slate-900 border border-slate-800 shadow-inner flex items-center justify-center">
+                    <img
+                      src={anvayaLogo}
+                      alt="ANVAYA Seal"
+                      className="w-14 h-14 rounded-full object-cover bg-white p-0.5 border border-emerald-500/30 opacity-85 shadow-md"
+                    />
+                  </div>
+                  <p className="max-w-md text-slate-400">
+                    Upload evidence files above or enter a query below to generate grounded intelligence briefings with asset-aware citation badges.
+                  </p>
                   
                   {/* Sample Query Pills */}
                   {documents.length > 0 && (
