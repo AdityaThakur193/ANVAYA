@@ -34,6 +34,14 @@ export default function App() {
   // Document Scoped Filter State
   const [documents, setDocuments] = useState<DocumentInfo[]>([]);
   const [selectedFileFilter, setSelectedFileFilter] = useState<string>('ALL');
+  const [isScopeDropdownOpen, setIsScopeDropdownOpen] = useState(false);
+
+  // Custom Tactical Modal & Toast States
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Visual Canvas Controls (Zoom & Page Page Nav)
+  const [canvasZoom, setCanvasZoom] = useState<number>(100);
 
   // Real-time progress status state
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
@@ -41,6 +49,13 @@ export default function App() {
 
   // Tab view inside Proof Panel: 'visual' vs 'text'
   const [proofTab, setProofTab] = useState<'visual' | 'text'>('visual');
+
+  const scopeDropdownRef = useRef<HTMLDivElement>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
 
   const loadDocuments = async () => {
     const docs = await fetchIngestedDocuments();
@@ -50,6 +65,14 @@ export default function App() {
   useEffect(() => {
     checkBackendHealth();
     loadDocuments();
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (scopeDropdownRef.current && !scopeDropdownRef.current.contains(event.target as Node)) {
+        setIsScopeDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const toggleMicRecording = async () => {
@@ -83,6 +106,7 @@ export default function App() {
             if (res.transcript && res.transcript.trim()) {
               setQuery(res.transcript.trim());
               setUploadStatus(`✅ 100% Offline Transcribed: "${res.transcript.trim()}"`);
+              showToast('🎙️ Microphone speech transcribed offline cleanly!');
             } else {
               setUploadStatus('⚠️ No spoken speech detected in microphone recording.');
             }
@@ -99,7 +123,7 @@ export default function App() {
         setIsRecording(true);
       } catch (err) {
         console.error('Microphone access error:', err);
-        alert('Microphone permission denied or audio device not found.');
+        showToast('❌ Microphone permission denied or audio hardware absent.');
       }
     }
   };
@@ -116,6 +140,7 @@ export default function App() {
     setIsProcessing(true);
     setUploadStatus(null);
     setActiveProof(null);
+    setCanvasZoom(100);
     try {
       const data = await submitIntelligenceQuery(targetQuery, selectedFileFilter);
       setResponse(data);
@@ -126,14 +151,14 @@ export default function App() {
       }
     } catch (err) {
       console.error('Query execution error:', err);
-      alert('Backend connection error. Please start the FastAPI backend server (http://localhost:8080).');
+      showToast('❌ Backend connection error. Start FastAPI server at http://localhost:8080.');
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const handleResetDatabase = async () => {
-    if (!window.confirm('Wipe 100% of vector databases and uploaded files?')) return;
+  const executeResetDatabase = async () => {
+    setShowResetModal(false);
     try {
       await resetDatabase();
       setResponse(null);
@@ -141,9 +166,10 @@ export default function App() {
       setSelectedFileFilter('ALL');
       setDocuments([]);
       setUploadStatus('🧹 Database reset cleanly. Zero documents remaining.');
+      showToast('🧹 100% Vector DB & evidence uploads purged cleanly.');
     } catch (err) {
       console.error('Reset database error:', err);
-      alert('Failed to reset database.');
+      showToast('❌ Failed to reset database.');
     }
   };
 
@@ -170,8 +196,10 @@ export default function App() {
       
       if (res.is_duplicate) {
         setUploadStatus(`⚠️ SimHash Near-Duplicate Detected: ${res.file_name} is a near-duplicate of ${res.duplicate_of}. Database bloat skipped!`);
+        showToast(`⚠️ SimHash deduplication skipped ${res.file_name}!`);
       } else {
         setUploadStatus(`✅ Successfully processed & indexed ${res.file_name} (${res.total_chunks_indexed} timestamped chunks)`);
+        showToast(`✅ Successfully indexed ${res.file_name}`);
       }
       await loadDocuments();
     } catch (err) {
@@ -179,6 +207,7 @@ export default function App() {
       clearTimeout(indexTimer);
       console.error('File upload error:', err);
       setUploadStatus(`❌ Ingestion failed for ${file.name}`);
+      showToast(`❌ Ingestion failed for ${file.name}`);
     } finally {
       setIsUploading(false);
     }
@@ -198,9 +227,15 @@ export default function App() {
       citation,
       chunk: match
     });
+    setCanvasZoom(100);
 
     const isVisual = citation.file_name.endsWith('.pdf') || citation.file_name.endsWith('.png') || citation.file_name.endsWith('.jpg') || citation.file_name.endsWith('.jpeg');
     setProofTab(isVisual ? 'visual' : 'text');
+  };
+
+  const copyChunkText = (text: string) => {
+    navigator.clipboard.writeText(text);
+    showToast('📋 Evidence text copied to clipboard!');
   };
 
   const renderFormattedAnswer = (text: string) => {
@@ -234,10 +269,10 @@ export default function App() {
 
       if (isAudio) {
         badgeLabel = `🎵 Audio Intercept: ${fileName} (Time: ${computedValue})`;
-        badgeStyle = 'bg-amber-950/60 border-amber-600/50 text-amber-300 hover:bg-amber-900/60';
+        badgeStyle = 'bg-amber-950/70 border-amber-600/60 text-amber-300 hover:bg-amber-900/80';
       } else if (isImage) {
         badgeLabel = `🖼️ Recon Image: ${fileName}`;
-        badgeStyle = 'bg-sky-950/60 border-sky-600/50 text-sky-300 hover:bg-sky-900/60';
+        badgeStyle = 'bg-sky-950/70 border-sky-600/60 text-sky-300 hover:bg-sky-900/80';
       } else {
         badgeLabel = `📄 Classified Doc: ${fileName} (Page: ${computedValue})`;
         badgeStyle = 'bg-[#123534] border-[#2E8682] text-emerald-300 hover:bg-[#1A4B49]';
@@ -247,7 +282,7 @@ export default function App() {
         <button
           key={matchIndex}
           onClick={() => handleCitationClick(citationObj)}
-          className={`inline-flex items-center gap-1.5 px-3 py-1 mx-1 my-1 rounded border font-mono text-xs font-semibold cursor-pointer transition-all shadow-sm hover:scale-105 ${badgeStyle}`}
+          className={`inline-flex items-center gap-1.5 px-3 py-1 mx-1 my-1 rounded border font-mono text-xs font-semibold cursor-pointer transition-all shadow-md hover:scale-105 ${badgeStyle}`}
         >
           <span>📌 {badgeLabel}</span>
         </button>
@@ -288,13 +323,59 @@ export default function App() {
     return '📄 CLASSIFIED DOCUMENT PROOF';
   };
 
+  const getSelectedFilterLabel = () => {
+    if (selectedFileFilter === 'ALL') return `🌐 All Ingested Files (${documents.length})`;
+    const match = documents.find(d => d.file_name === selectedFileFilter);
+    if (match) return `${getDocumentIcon(match.file_name)} ${match.file_name}`;
+    return selectedFileFilter;
+  };
+
   return (
-    <div className="min-h-screen bg-[#0B131E] text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#0B131E] text-slate-100 flex flex-col font-sans relative selection:bg-[#26716E] selection:text-white">
+      {/* Floating Tactical Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-16 right-6 z-50 bg-[#131F2E] border border-[#2E8682] text-emerald-300 font-mono text-xs px-4 py-2.5 rounded-lg shadow-2xl flex items-center gap-2 animate-bounce">
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* CUSTOM TACTICAL CONFIRMATION MODAL FOR DATABASE PURGE */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#131F2E] border border-rose-600/70 rounded-xl p-6 max-w-md w-full shadow-2xl space-y-4 font-sans">
+            <div className="flex items-center space-x-3 border-b border-[#1E2E42] pb-3">
+              <span className="text-xl">⚠️</span>
+              <h3 className="text-base font-extrabold text-white font-mono uppercase tracking-wider">
+                Wipe Vector Database & Uploads?
+              </h3>
+            </div>
+
+            <p className="text-slate-300 text-xs leading-relaxed">
+              This action will permanently purge 100% of ChromaDB vector collections, SQLite FTS5 indexes, and uploaded evidence files. This operation cannot be undone.
+            </p>
+
+            <div className="flex justify-end space-x-3 pt-2">
+              <button
+                onClick={() => setShowResetModal(false)}
+                className="bg-[#080E17] hover:bg-[#1E2E42] text-slate-300 font-semibold px-4 py-2 rounded text-xs transition border border-[#1E2E42]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={executeResetDatabase}
+                className="bg-rose-600 hover:bg-rose-500 text-white font-extrabold px-5 py-2 rounded text-xs transition shadow-lg flex items-center gap-1.5"
+              >
+                <span>🧹 Confirm Wipe Data</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Brand Command Header Bar */}
-      <header className="border-b border-[#1E2E42] px-6 py-3.5 flex justify-between items-center bg-[#131F2E]/90 backdrop-blur-md sticky top-0 z-50 shadow-lg">
+      <header className="border-b border-[#1E2E42] px-6 py-3.5 flex justify-between items-center bg-[#131F2E]/90 backdrop-blur-md sticky top-0 z-40 shadow-lg">
         <div className="flex items-center space-x-3.5">
-          {/* Official ANVAYA Logo Badge */}
-          <div className="w-9 h-9 rounded-full overflow-hidden border border-[#2E8682] shadow-md bg-white flex items-center justify-center p-0.5">
+          <div className="w-10 h-10 rounded-full overflow-hidden border border-[#2E8682] shadow-md bg-white flex items-center justify-center p-0.5">
             <img src="/logo.jpeg" alt="ANVAYA Logo" className="w-full h-full object-contain rounded-full" />
           </div>
           <div>
@@ -314,7 +395,7 @@ export default function App() {
           </span>
 
           <button
-            onClick={handleResetDatabase}
+            onClick={() => setShowResetModal(true)}
             title="Wipe vector databases and uploaded evidence files"
             className="bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 font-semibold px-3 py-1.5 rounded text-xs transition flex items-center gap-1 shadow-sm"
           >
@@ -343,7 +424,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Dual-Pane Command Console */}
+      {/* Main Dual-Pane Command Console Grid */}
       <main className="flex-1 p-6 max-w-7xl w-full mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6">
         
         {/* Left Column: Multimodal Briefing Console & Inputs */}
@@ -361,21 +442,44 @@ export default function App() {
                 )}
               </div>
 
-              {/* Document Scope Search Filter Selector */}
-              <div className="flex items-center space-x-2">
-                <span className="text-[11px] text-slate-400 font-mono">Scope:</span>
-                <select
-                  value={selectedFileFilter}
-                  onChange={(e) => setSelectedFileFilter(e.target.value)}
-                  className="bg-[#080E17] border border-[#1E2E42] text-[#34D399] text-xs rounded px-2.5 py-1 focus:outline-none focus:border-[#2E8682] font-mono font-semibold cursor-pointer max-w-[200px] truncate"
+              {/* CUSTOM TACTICAL SCOPE SEARCH DROPDOWN */}
+              <div className="relative" ref={scopeDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsScopeDropdownOpen(!isScopeDropdownOpen)}
+                  className="bg-[#080E17] border border-[#1E2E42] hover:border-[#2E8682] text-[#34D399] text-xs rounded px-3 py-1.5 focus:outline-none font-mono font-semibold flex items-center gap-2 shadow-sm transition max-w-[210px] truncate"
                 >
-                  <option value="ALL">🌐 All Ingested Files ({documents.length})</option>
-                  {documents.map((doc) => (
-                    <option key={doc.file_name} value={doc.file_name}>
-                      {getDocumentIcon(doc.file_name)} {doc.file_name} ({doc.chunk_count} chunks)
-                    </option>
-                  ))}
-                </select>
+                  <span className="truncate">{getSelectedFilterLabel()}</span>
+                  <span className="text-[10px] text-slate-400">▼</span>
+                </button>
+
+                {isScopeDropdownOpen && (
+                  <div className="absolute right-0 mt-1 w-64 bg-[#0B131E] border border-[#2E8682] rounded-lg shadow-2xl z-50 py-1 max-h-56 overflow-y-auto font-mono text-xs">
+                    <div className="px-3 py-1 text-[10px] uppercase text-slate-500 font-bold border-b border-[#1E2E42]">
+                      Target Scope Filter
+                    </div>
+                    <button
+                      onClick={() => { setSelectedFileFilter('ALL'); setIsScopeDropdownOpen(false); }}
+                      className={`w-full text-left px-3 py-2 hover:bg-[#131F2E] flex items-center justify-between transition ${selectedFileFilter === 'ALL' ? 'text-[#34D399] font-bold bg-[#123534]/50' : 'text-slate-300'}`}
+                    >
+                      <span className="truncate">🌐 All Ingested Files</span>
+                      <span className="text-[10px] text-slate-500">({documents.length})</span>
+                    </button>
+                    {documents.map((doc) => (
+                      <button
+                        key={doc.file_name}
+                        onClick={() => { setSelectedFileFilter(doc.file_name); setIsScopeDropdownOpen(false); }}
+                        className={`w-full text-left px-3 py-2 hover:bg-[#131F2E] flex items-center justify-between transition ${selectedFileFilter === doc.file_name ? 'text-[#34D399] font-bold bg-[#123534]/50' : 'text-slate-300'}`}
+                      >
+                        <span className="truncate flex items-center gap-1.5">
+                          <span>{getDocumentIcon(doc.file_name)}</span>
+                          <span className="truncate">{doc.file_name}</span>
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-mono">{doc.chunk_count}c</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             
@@ -393,7 +497,7 @@ export default function App() {
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-slate-400 text-center py-12 text-xs font-sans space-y-4">
                   <p className="max-w-md leading-relaxed text-slate-400">
-                    Upload defense evidence files above or dictating/type a plain-language query below to generate grounded intelligence briefings with verified citation badges.
+                    Upload defense evidence files above or dictate/type a query below to generate grounded intelligence briefings with verified citation badges.
                   </p>
                   
                   {/* Quick Sample Queries */}
@@ -403,13 +507,13 @@ export default function App() {
                       <div className="flex flex-wrap justify-center gap-2 max-w-md">
                         <button
                           onClick={() => { setQuery("whose name is written in the resume"); handleSynthesize("whose name is written in the resume"); }}
-                          className="bg-[#131F2E] hover:bg-[#1E2E42] border border-[#1E2E42] text-emerald-400 text-[11px] px-3 py-1 rounded transition font-mono"
+                          className="bg-[#131F2E] hover:bg-[#1E2E42] border border-[#1E2E42] hover:border-[#2E8682] text-[#34D399] text-[11px] px-3 py-1.5 rounded transition font-mono shadow-sm"
                         >
                           "whose name is written in the resume"
                         </button>
                         <button
                           onClick={() => { setQuery("what timestamp was harvard mentioned"); handleSynthesize("what timestamp was harvard mentioned"); }}
-                          className="bg-[#131F2E] hover:bg-[#1E2E42] border border-[#1E2E42] text-amber-300 text-[11px] px-3 py-1 rounded transition font-mono"
+                          className="bg-[#131F2E] hover:bg-[#1E2E42] border border-[#1E2E42] hover:border-amber-600/50 text-amber-300 text-[11px] px-3 py-1.5 rounded transition font-mono shadow-sm"
                         >
                           "what timestamp was harvard mentioned"
                         </button>
@@ -546,21 +650,47 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* VISUAL PAGE CANVAS DISPLAY */}
+                {/* VISUAL PAGE CANVAS DISPLAY WITH INTERACTIVE ZOOM CONTROLS */}
                 {proofTab === 'visual' && isVisualSupported ? (
                   <div className="bg-[#131F2E] border border-amber-500/40 p-2 rounded-lg space-y-2 shadow-inner flex flex-col items-center">
-                    <div className="w-full flex items-center justify-between border-b border-[#1E2E42] pb-1.5 px-1">
-                      <span className="text-amber-400 font-mono text-xs font-bold uppercase flex items-center gap-1">
+                    <div className="w-full flex items-center justify-between border-b border-[#1E2E42] pb-1.5 px-1 font-mono text-xs">
+                      <span className="text-amber-400 font-bold uppercase flex items-center gap-1">
                         <span>🖼️ VERIFIED PAGE CANVAS PROOF</span>
                       </span>
-                      <span className="text-[#34D399] font-mono text-[10px]">Page {pageNum} Rendered</span>
+                      
+                      {/* Zoom Controls */}
+                      <div className="flex items-center space-x-1.5 bg-[#080E17] px-2 py-0.5 rounded border border-[#1E2E42]">
+                        <button
+                          onClick={() => setCanvasZoom(Math.max(50, canvasZoom - 25))}
+                          className="text-slate-400 hover:text-white font-bold px-1"
+                          title="Zoom out"
+                        >
+                          -
+                        </button>
+                        <span className="text-[10px] text-slate-300 font-mono">{canvasZoom}%</span>
+                        <button
+                          onClick={() => setCanvasZoom(Math.min(200, canvasZoom + 25))}
+                          className="text-slate-400 hover:text-white font-bold px-1"
+                          title="Zoom in"
+                        >
+                          +
+                        </button>
+                        <button
+                          onClick={() => setCanvasZoom(100)}
+                          className="text-[9px] text-[#34D399] font-bold px-1 border-l border-[#1E2E42]"
+                          title="Reset zoom"
+                        >
+                          Reset
+                        </button>
+                      </div>
                     </div>
 
                     <div className="relative border border-[#1E2E42] rounded bg-[#080E17] p-1 overflow-auto max-h-[300px] w-full flex justify-center">
                       <img
                         src={pageImageUrl}
                         alt={`Proof page ${pageNum}`}
-                        className="rounded shadow-md max-w-full h-auto object-contain border border-amber-500/20"
+                        style={{ transform: `scale(${canvasZoom / 100})`, transformOrigin: 'top center' }}
+                        className="rounded shadow-md max-w-full h-auto object-contain border border-amber-500/20 transition-transform duration-200"
                         onError={(e) => {
                           setProofTab('text');
                         }}
@@ -571,18 +701,23 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  /* EXTRACTED EVIDENCE TEXT DISPLAY */
+                  /* EXTRACTED EVIDENCE TEXT DISPLAY WITH COPY BUTTON */
                   <div className="bg-[#131F2E] border border-[#2E8682] p-3.5 rounded-lg space-y-2 shadow-inner">
-                    <div className="flex items-center justify-between border-b border-[#1E2E42] pb-2">
-                      <span className="text-[#34D399] font-mono text-xs font-bold uppercase tracking-wider flex items-center gap-1">
+                    <div className="flex items-center justify-between border-b border-[#1E2E42] pb-2 font-mono text-xs">
+                      <span className="text-[#34D399] font-bold uppercase tracking-wider flex items-center gap-1">
                         <span>✓ EXACT EXTRACTED EVIDENCE CONTENT</span>
                       </span>
-                      {activeProof.chunk?.rrf_score && (
-                        <span className="text-slate-400 font-mono text-[10px]">RRF Score: {activeProof.chunk.rrf_score}</span>
+                      {activeProof.chunk && (
+                        <button
+                          onClick={() => copyChunkText(activeProof.chunk!.text)}
+                          className="bg-[#080E17] hover:bg-[#1E2E42] text-slate-300 text-[10px] font-bold px-2 py-0.5 rounded border border-[#1E2E42] transition"
+                        >
+                          📋 Copy Text
+                        </button>
                       )}
                     </div>
 
-                    <div className="bg-[#080E17] p-3.5 rounded-md text-slate-200 leading-relaxed font-sans text-xs border border-[#1E2E42] whitespace-pre-wrap max-h-[220px] overflow-y-auto">
+                    <div className="bg-[#080E17] p-3.5 rounded-md text-slate-200 leading-relaxed font-sans text-xs border border-[#1E2E42] whitespace-pre-wrap max-h-[220px] overflow-y-auto select-text">
                       {activeProof.chunk ? activeProof.chunk.text : `Source text chunk for ${activeProof.citation.file_name} (${activeProof.citation.type}: ${activeProof.citation.value})`}
                     </div>
                   </div>
