@@ -19,8 +19,8 @@ from app.services.llm.local_llm import LocalLLMEngine
 
 app = FastAPI(
     title="ANVAYA — Air-Gapped Multimodal RAG API",
-    description="100% Offline Multi-Case Intelligence Engine for NTRO (SIH25231 / SIH26154)",
-    version="1.3.0"
+    description="100% Offline Multi-Case Intelligence Engine for NTRO (SIH25231)",
+    version="1.4.0"
 )
 
 # Real-time HTTP Request Terminal Logger Middleware
@@ -71,7 +71,7 @@ def health_check():
         "status": "online",
         "air_gapped": True,
         "system": "ANVAYA Multimodal Offline RAG Engine",
-        "sih_ps": "SIH25231 / SIH26154",
+        "sih_ps": "SIH25231",
         "agency": "NTRO (Prime Minister's Office)"
     }
 
@@ -141,7 +141,6 @@ def get_document_page_image(file_name: str, page_number: int = 1, highlight_text
 
     fname_lower = file_name.lower()
 
-    # 1. Handle PDF page rendering via PyMuPDF (fitz) with visual marker highlighting
     if fname_lower.endswith(".pdf"):
         try:
             import fitz
@@ -149,7 +148,6 @@ def get_document_page_image(file_name: str, page_number: int = 1, highlight_text
             page_idx = max(0, min(page_number - 1, len(doc) - 1))
             page = doc.load_page(page_idx)
 
-            # Perform visual text marker highlighting if highlight_text is specified
             if highlight_text and highlight_text.strip():
                 clean_terms = [t.strip() for t in highlight_text.split() if len(t.strip()) > 2]
                 for term in clean_terms[:5]:
@@ -157,7 +155,7 @@ def get_document_page_image(file_name: str, page_number: int = 1, highlight_text
                     if quads:
                         for q in quads:
                             annot = page.add_highlight_annot(q)
-                            annot.set_colors(stroke=(1.0, 0.85, 0.0))  # Bright Amber Yellow Highlight Marker
+                            annot.set_colors(stroke=(1.0, 0.85, 0.0))
                             annot.update()
 
             pix = page.get_pixmap(dpi=150)
@@ -166,7 +164,6 @@ def get_document_page_image(file_name: str, page_number: int = 1, highlight_text
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"PDF rendering error: {str(e)}")
 
-    # 2. Handle Image files (.png, .jpg, .jpeg)
     elif fname_lower.endswith((".png", ".jpg", ".jpeg")):
         with open(file_location, "rb") as f:
             return Response(content=f.read(), media_type="image/png")
@@ -180,7 +177,6 @@ def reset_all_data():
     print("[RESET API] Purging all vector databases & files...", flush=True)
     vector_store.purge_all_data()
 
-    # Clear uploads folder
     if os.path.exists(UPLOADS_DIR):
         for f in os.listdir(UPLOADS_DIR):
             if f != ".gitkeep":
@@ -189,6 +185,31 @@ def reset_all_data():
                     os.remove(p)
 
     return {"status": "success", "message": "All vector databases, FTS indexes, and uploaded files cleared cleanly."}
+
+@app.post("/api/voice_query")
+async def transcribe_voice_microphone(file: UploadFile = File(...)):
+    """Transcribes browser microphone audio recordings 100% OFFLINE via local Faster-Whisper INT8 engine."""
+    temp_voice_path = os.path.join(UPLOADS_DIR, f"voice_mic_{file.filename}")
+    with open(temp_voice_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    try:
+        print(f"[OFFLINE VOICE STT] Transcribing microphone audio via Faster-Whisper CPU engine...", flush=True)
+        res = ingestor.audio_parser.parse(temp_voice_path)
+        transcript = res.get("text", "").strip()
+        if not transcript and "chunks" in res:
+            transcript = " ".join([c["text"] for c in res["chunks"]]).strip()
+
+        if os.path.exists(temp_voice_path):
+            os.remove(temp_voice_path)
+
+        print(f"[OFFLINE VOICE SUCCESS] Transcribed: '{transcript}'", flush=True)
+        return {"status": "success", "transcript": transcript}
+    except Exception as e:
+        if os.path.exists(temp_voice_path):
+            os.remove(temp_voice_path)
+        print(f"[OFFLINE VOICE ERROR] Transcription failed: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=f"Offline Voice STT failed: {str(e)}")
 
 @app.post("/api/ingest")
 async def ingest_evidence_file(file: UploadFile = File(...), case_id: str = Form("default_case")):
@@ -227,7 +248,6 @@ def query_intelligence_briefing(request: QueryRequest):
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
-    # 1. Execute Dense + Sparse Hybrid Search with Case Isolation & File Scoping
     print(f"[HYBRID SEARCH] Executing ChromaDB + SQLite FTS5 RRF search...", flush=True)
     retrieved_chunks = vector_store.hybrid_search(
         query=request.query,

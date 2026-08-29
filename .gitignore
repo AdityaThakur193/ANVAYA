@@ -4,11 +4,13 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.pytest_cache/
 
 # Virtual Environment
 venv/
 ENV/
 env/
+.venv/
 
 # Node & Frontend Build
 node_modules/
@@ -18,22 +20,20 @@ out/
 *.log
 *.tsbuildinfo
 
-# ANVAYA Processed Data, Sample Binaries & Vector Databases
+# ANVAYA Processed Data, Databases & Local Uploads
 data/processed_text/*
 !data/processed_text/.gitkeep
 data/chroma_db/
 data/uploads/*
 !data/uploads/.gitkeep
-data/anvaya_fts.db
-data/anvaya_fts.db-wal
-data/anvaya_fts.db-shm
+data/anvaya_fts.db*
 data/metadata.json
-data/sample_case/*
-!data/sample_case/.gitkeep
 data/*.py
 backend/data/
 models/
 
-# OS Specific
+# OS & IDE Files
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/

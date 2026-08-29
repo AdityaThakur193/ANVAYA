@@ -20,7 +20,6 @@ class AudioTranscriber:
         if self._whisper_model is None:
             # 1. Try faster-whisper (CTranslate2 INT8 CPU Engine)
             model_candidates = [self.model_size, "small", "base", "tiny"]
-            # Deduplicate candidate list while preserving order
             unique_candidates = list(dict.fromkeys(model_candidates))
 
             try:
@@ -42,7 +41,7 @@ class AudioTranscriber:
             except Exception:
                 pass
 
-            # 2. Try OpenAI whisper library fallback if faster-whisper is not available
+            # 2. Try OpenAI whisper library fallback
             if self._whisper_model is None:
                 try:
                     import whisper
@@ -64,6 +63,10 @@ class AudioTranscriber:
 
         return self._whisper_model
 
+    def parse(self, audio_path: str) -> Dict[str, Any]:
+        """Unified parser interface for MasterIngestor."""
+        return self.transcribe_audio(audio_path)
+
     def transcribe_audio(self, audio_path: str) -> Dict[str, Any]:
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
@@ -79,8 +82,8 @@ class AudioTranscriber:
             try:
                 segments, _ = model.transcribe(
                     audio_path,
-                    beam_size=3,            # Beam search size 3 for higher accuracy
-                    vad_filter=True,        # Strip background wiretap radio static
+                    beam_size=3,
+                    vad_filter=True,
                     vad_parameters=dict(min_silence_duration_ms=500)
                 )
 
@@ -125,13 +128,12 @@ class AudioTranscriber:
             except Exception as err:
                 print(f"[WARN] openai-whisper transcription error: {err}")
 
-        combined_text = "\n".join(full_text_list) if full_text_list else f"[Audio Wiretap: {base_filename}]"
+        combined_text = " ".join([c["text"] for c in audio_chunks]).strip() if audio_chunks else ""
 
-        # Save extracted text to disk
         out_filename = f"{os.path.splitext(base_filename)[0]}_audioText.txt"
         out_path = os.path.join(self.output_dir, out_filename)
         with open(out_path, "w", encoding="utf-8") as out:
-            out.write(combined_text)
+            out.write("\n".join(full_text_list) if full_text_list else combined_text)
 
         print(f"[OK] Transcribed {len(audio_chunks)} audio segments for {base_filename}")
 
@@ -141,6 +143,7 @@ class AudioTranscriber:
                 "type": "audio",
                 "processed_at": datetime.now().isoformat()
             },
+            "text": combined_text,
             "text_path": out_path,
             "chunks": audio_chunks
         }

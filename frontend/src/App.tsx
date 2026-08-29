@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   API_BASE_URL,
   checkBackendHealth,
@@ -6,6 +6,7 @@ import {
   uploadEvidenceFile,
   fetchIngestedDocuments,
   resetDatabase,
+  transcribeVoiceAudio,
   QueryResponse,
   Citation,
   RetrievedChunk,
@@ -19,9 +20,11 @@ export default function App() {
   const [response, setResponse] = useState<QueryResponse | null>(null);
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
   
-  // Voice Microphone Speech Recognition State
-  const [isListening, setIsListening] = useState(false);
-  const [recognition, setRecognition] = useState<any>(null);
+  // 100% Offline Air-Gapped Microphone Speech Recording State
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribingMic, setIsTranscribingMic] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   // Active Proof Viewer State (stores citation metadata + matching text chunk)
   const [activeProof, setActiveProof] = useState<{
@@ -54,58 +57,57 @@ export default function App() {
     verifyHealth();
     loadDocuments();
     const interval = setInterval(verifyHealth, 10000);
-
-    // Initialize Web Speech API SpeechRecognition
-    const { SpeechRecognition, webkitSpeechRecognition } = window as any;
-    const SpeechRecognitionApi = SpeechRecognition || webkitSpeechRecognition;
-    if (SpeechRecognitionApi) {
-      const reco = new SpeechRecognitionApi();
-      reco.continuous = false;
-      reco.interimResults = true;
-      reco.lang = 'en-US';
-
-      reco.onresult = (event: any) => {
-        let currentTranscript = '';
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          currentTranscript += event.results[i][0].transcript;
-        }
-        if (currentTranscript.trim()) {
-          setQuery(currentTranscript);
-        }
-      };
-
-      reco.onerror = (event: any) => {
-        console.warn('Speech recognition notice:', event.error);
-        setIsListening(false);
-      };
-
-      reco.onend = () => {
-        setIsListening(false);
-      };
-
-      setRecognition(reco);
-    }
-
     return () => clearInterval(interval);
   }, []);
 
-  const toggleListening = () => {
-    if (!recognition) {
-      alert('Voice speech recognition is not supported in this browser. Please use Chrome, Edge, or Brave.');
-      return;
-    }
-
-    if (isListening) {
-      try {
-        recognition.stop();
-      } catch (e) {}
-      setIsListening(false);
+  const toggleMicRecording = async () => {
+    if (isRecording) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      setIsRecording(false);
     } else {
       try {
-        recognition.start();
-        setIsListening(true);
-      } catch (e) {
-        console.error('Failed to start speech recognition:', e);
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioChunksRef.current = [];
+        const recorder = new MediaRecorder(stream);
+
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
+        };
+
+        recorder.onstop = async () => {
+          stream.getTracks().forEach((track) => track.stop());
+
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          if (audioBlob.size < 100) return;
+
+          setIsTranscribingMic(true);
+          setUploadStatus('⚡ Transcribing microphone speech 100% OFFLINE via Faster-Whisper CPU Engine...');
+          try {
+            const res = await transcribeVoiceAudio(audioBlob);
+            if (res.transcript && res.transcript.trim()) {
+              setQuery(res.transcript.trim());
+              setUploadStatus(`✅ 100% Offline Transcribed: "${res.transcript.trim()}"`);
+            } else {
+              setUploadStatus('⚠️ No spoken speech detected in microphone recording.');
+            }
+          } catch (err) {
+            console.error('Offline Voice STT error:', err);
+            setUploadStatus('❌ Offline Voice STT Error. Ensure backend is running.');
+          } finally {
+            setIsTranscribingMic(false);
+          }
+        };
+
+        recorder.start();
+        mediaRecorderRef.current = recorder;
+        setIsRecording(true);
+      } catch (err) {
+        console.error('Microphone access error:', err);
+        alert('Microphone permission denied or audio device not found.');
       }
     }
   };
@@ -114,9 +116,9 @@ export default function App() {
     const targetQuery = overrideQuery || query;
     if (!targetQuery.trim() || isProcessing) return;
 
-    if (isListening && recognition) {
-      try { recognition.stop(); } catch (e) {}
-      setIsListening(false);
+    if (isRecording && mediaRecorderRef.current) {
+      try { mediaRecorderRef.current.stop(); } catch (e) {}
+      setIsRecording(false);
     }
 
     setIsProcessing(true);
@@ -328,7 +330,7 @@ export default function App() {
           )}
         </div>
         <div className="text-xs font-medium text-slate-400 flex items-center gap-3">
-          <span className="hidden sm:inline">SIH25231 / SIH26154 • NTRO (PMO)</span>
+          <span className="hidden sm:inline">SIH25231 • NTRO (PMO)</span>
 
           <button
             onClick={handleResetDatabase}
@@ -349,10 +351,10 @@ export default function App() {
       {uploadStatus && (
         <div className="bg-slate-900 border-b border-slate-800 px-6 py-2.5 text-xs font-mono text-emerald-400 flex items-center justify-between shadow-inner">
           <div className="flex items-center space-x-2">
-            {isUploading && <span className="animate-spin text-emerald-400">⚙️</span>}
+            {(isUploading || isTranscribingMic) && <span className="animate-spin text-emerald-400">⚙️</span>}
             <span>{uploadStatus}</span>
           </div>
-          {isUploading && (
+          {(isUploading || isTranscribingMic) && (
             <div className="w-32 bg-slate-800 h-1.5 rounded-full overflow-hidden">
               <div className="bg-emerald-400 h-full animate-pulse w-3/4"></div>
             </div>
@@ -443,7 +445,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Search Query Input Bar with Live Voice Microphone STT */}
+          {/* Search Query Input Bar with 100% Offline Faster-Whisper Voice Microphone */}
           <div className="flex gap-2 relative items-center">
             <div className="relative flex-1 flex items-center">
               <input
@@ -451,22 +453,37 @@ export default function App() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSynthesize()}
-                placeholder={isListening ? "🎙️ Listening... Speak into your microphone..." : "Ask a plain-language query across evidence files..."}
-                className={`w-full bg-slate-900 border ${isListening ? 'border-rose-500 ring-2 ring-rose-500/40 text-rose-200' : 'border-slate-800 focus:border-emerald-500 text-slate-100'} rounded-lg pl-4 pr-20 py-3 text-sm focus:outline-none placeholder-slate-500 shadow-inner`}
+                placeholder={
+                  isRecording
+                    ? "🔴 Recording voice offline... Click mic icon to finish..."
+                    : isTranscribingMic
+                    ? "⚡ Transcribing mic audio via Faster-Whisper..."
+                    : "Ask a plain-language query across evidence files..."
+                }
+                className={`w-full bg-slate-900 border ${
+                  isRecording
+                    ? 'border-rose-500 ring-2 ring-rose-500/40 text-rose-200 animate-pulse'
+                    : isTranscribingMic
+                    ? 'border-amber-500 text-amber-200'
+                    : 'border-slate-800 focus:border-emerald-500 text-slate-100'
+                } rounded-lg pl-4 pr-20 py-3 text-sm focus:outline-none placeholder-slate-500 shadow-inner`}
               />
 
-              {/* Voice Speech Microphone Toggle Button */}
+              {/* 100% Offline Voice Speech Microphone Toggle Button */}
               <button
-                onClick={toggleListening}
+                onClick={toggleMicRecording}
+                disabled={isTranscribingMic}
                 type="button"
                 className={`absolute right-8 p-1.5 rounded-md transition flex items-center justify-center ${
-                  isListening
+                  isRecording
                     ? 'bg-rose-600 text-white animate-pulse shadow-lg shadow-rose-500/50 scale-110'
+                    : isTranscribingMic
+                    ? 'bg-amber-600 text-slate-950 animate-spin'
                     : 'text-slate-400 hover:text-emerald-400 hover:bg-slate-800'
                 }`}
-                title={isListening ? "Recording voice... Click to stop" : "Click to speak into microphone"}
+                title={isRecording ? "Click to stop & transcribe offline" : "Click to speak into microphone (100% Offline Whisper)"}
               >
-                <span className="text-sm">🎙️</span>
+                <span className="text-sm">{isTranscribingMic ? '⚙️' : '🎙️'}</span>
               </button>
 
               {/* Clear Input Button */}
