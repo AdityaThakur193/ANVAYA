@@ -1,5 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { checkBackendHealth, submitIntelligenceQuery, uploadEvidenceFile, QueryResponse, Citation } from './services/api';
+import {
+  checkBackendHealth,
+  submitIntelligenceQuery,
+  uploadEvidenceFile,
+  fetchIngestedDocuments,
+  resetDatabase,
+  QueryResponse,
+  Citation,
+  DocumentInfo
+} from './services/api';
 
 export default function App() {
   const [query, setQuery] = useState('');
@@ -7,12 +16,22 @@ export default function App() {
   const [response, setResponse] = useState<QueryResponse | null>(null);
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
   
+  // Document Scoped Filter State
+  const [documents, setDocuments] = useState<DocumentInfo[]>([]);
+  const [selectedFileFilter, setSelectedFileFilter] = useState<string>('ALL');
+
   // Real-time progress status state
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
 
+  const loadDocuments = async () => {
+    const docs = await fetchIngestedDocuments();
+    setDocuments(docs);
+  };
+
   useEffect(() => {
     checkBackendHealth();
+    loadDocuments();
   }, []);
 
   const handleSynthesize = async () => {
@@ -20,13 +39,28 @@ export default function App() {
     setIsProcessing(true);
     setUploadStatus(null);
     try {
-      const data = await submitIntelligenceQuery(query);
+      const data = await submitIntelligenceQuery(query, selectedFileFilter);
       setResponse(data);
     } catch (err) {
       console.error('Query execution error:', err);
-      alert('Backend connection error. Make sure FastAPI backend server is running on http://localhost:8000');
+      alert('Backend connection error. Make sure FastAPI backend server is running on http://localhost:8080');
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleResetDatabase = async () => {
+    if (!window.confirm('Wipe 100% of vector databases and uploaded files?')) return;
+    try {
+      await resetDatabase();
+      setResponse(null);
+      setActiveCitation(null);
+      setSelectedFileFilter('ALL');
+      setDocuments([]);
+      setUploadStatus('🧹 Database reset cleanly. Zero documents remaining.');
+    } catch (err) {
+      console.error('Reset database error:', err);
+      alert('Failed to reset database.');
     }
   };
 
@@ -38,7 +72,6 @@ export default function App() {
     setIsUploading(true);
     setUploadStatus(`⚡ Stage 1/3: Uploaded ${file.name}. Initializing ${isAudio ? 'Whisper Speech Engine...' : 'Document Parser...'}`);
     
-    // Simulate real-time stage updates while processing
     const stageTimer = setTimeout(() => {
       setUploadStatus(`⚡ Stage 2/3: ${isAudio ? 'Transcribing audio speech & filtering static (Whisper VAD)...' : 'Extracting layout blocks & tables...'}`);
     }, 2000);
@@ -57,6 +90,7 @@ export default function App() {
       } else {
         setUploadStatus(`✅ Successfully processed & indexed ${res.file_name} (${res.total_chunks_indexed} timestamped chunks)`);
       }
+      await loadDocuments();
     } catch (err) {
       clearTimeout(stageTimer);
       clearTimeout(indexTimer);
@@ -111,8 +145,16 @@ export default function App() {
             AIR-GAPPED (100% OFFLINE)
           </span>
         </div>
-        <div className="text-xs font-medium text-slate-400 flex items-center gap-4">
+        <div className="text-xs font-medium text-slate-400 flex items-center gap-3">
           <span>SIH25231 / SIH26154 • NTRO (PMO)</span>
+
+          <button
+            onClick={handleResetDatabase}
+            className="bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 font-medium px-3 py-1.5 rounded text-xs transition flex items-center gap-1"
+          >
+            <span>🧹 Clear DB</span>
+          </button>
+
           <label className={`cursor-pointer bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded text-xs transition shadow-md flex items-center gap-2 ${isUploading ? 'opacity-50 pointer-events-none' : ''}`}>
             <span>{isUploading ? '⚡ Processing...' : '+ Upload Evidence File'}</span>
             <input type="file" onChange={handleFileUpload} className="hidden" accept=".pdf,.docx,.png,.jpg,.jpeg,.wav,.mp3" />
@@ -141,10 +183,28 @@ export default function App() {
         {/* Left Column: Grounded Intelligence Response & Input */}
         <div className="flex flex-col space-y-4">
           <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 flex-1 flex flex-col shadow-lg">
-            <h2 className="text-sm font-bold tracking-wide text-slate-300 mb-3 uppercase flex items-center justify-between">
-              <span>Grounded Intelligence Briefing</span>
-              <span className="text-xs text-slate-500 font-mono">Multi-Model Engine</span>
-            </h2>
+            <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-3">
+              <h2 className="text-sm font-bold tracking-wide text-slate-300 uppercase">
+                Grounded Intelligence Briefing
+              </h2>
+
+              {/* Document Scoped Filter Dropdown */}
+              <div className="flex items-center space-x-2">
+                <span className="text-xs text-slate-400 font-mono">Scope Search:</span>
+                <select
+                  value={selectedFileFilter}
+                  onChange={(e) => setSelectedFileFilter(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 text-emerald-400 text-xs rounded px-2.5 py-1 focus:outline-none focus:border-emerald-500 font-mono font-semibold"
+                >
+                  <option value="ALL">🌐 All Ingested Files ({documents.length})</option>
+                  {documents.map((doc) => (
+                    <option key={doc.file_name} value={doc.file_name}>
+                      📄 {doc.file_name} ({doc.chunk_count} chunks)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
             
             <div className="flex-1 bg-slate-950/60 rounded-lg p-4 text-slate-300 text-sm overflow-y-auto font-normal leading-relaxed border border-slate-800/50 min-h-[320px]">
               {isProcessing ? (
@@ -186,7 +246,7 @@ export default function App() {
 
         {/* Right Column: Dual Citation Navigation Panel */}
         <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 flex flex-col shadow-lg">
-          <h2 className="text-sm font-bold tracking-wide text-slate-300 mb-3 uppercase flex items-center justify-between">
+          <h2 className="text-sm font-bold tracking-wide text-slate-300 mb-3 uppercase flex items-center justify-between border-b border-slate-800 pb-3">
             <span>Interactive Source Citation Navigation</span>
             <span className="text-xs text-slate-500 font-mono">Proof Viewer</span>
           </h2>

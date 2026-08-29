@@ -25,6 +25,13 @@ export interface QueryResponse {
   retrieved_chunks: RetrievedChunk[];
 }
 
+export interface DocumentInfo {
+  file_name: string;
+  media_type: string;
+  case_id: string;
+  chunk_count: number;
+}
+
 export async function checkBackendHealth() {
   try {
     const res = await axios.get(`${API_BASE_URL}/`);
@@ -35,17 +42,40 @@ export async function checkBackendHealth() {
   }
 }
 
-export async function submitIntelligenceQuery(query: string, topK: number = 5): Promise<QueryResponse> {
+export async function fetchIngestedDocuments(): Promise<DocumentInfo[]> {
+  try {
+    const res = await axios.get(`${API_BASE_URL}/api/documents`);
+    return res.data.documents || [];
+  } catch (err) {
+    console.warn('Fetch documents warning:', err);
+    return [];
+  }
+}
+
+export async function resetDatabase() {
+  const res = await axios.delete(`${API_BASE_URL}/api/reset`);
+  return res.data;
+}
+
+export async function submitIntelligenceQuery(
+  query: string,
+  fileFilter: string = 'ALL',
+  caseId: string = 'default_case',
+  topK: number = 5
+): Promise<QueryResponse> {
   const res = await axios.post(`${API_BASE_URL}/api/query`, {
     query,
+    file_filter: fileFilter,
+    case_id: caseId,
     top_k: topK
   });
   return res.data;
 }
 
-export async function uploadEvidenceFile(file: File) {
+export async function uploadEvidenceFile(file: File, caseId: string = 'default_case') {
   const formData = new FormData();
   formData.append('file', file);
+  formData.append('case_id', caseId);
 
   const res = await axios.post(`${API_BASE_URL}/api/ingest`, formData, {
     headers: {
