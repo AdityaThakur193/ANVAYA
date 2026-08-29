@@ -13,49 +13,80 @@ This is kaushiks branch
 
 **ANVAYA** (Sanskrit: *अन्वय* — meaning *Synthesis, Connection & Grounded Relation*) is an enterprise-grade, 100% offline, air-gapped **Multimodal Retrieval-Augmented Generation (RAG)** platform built for the **National Technical Research Organisation (NTRO)** under **Smart India Hackathon (`SIH25231` / `SIH26154`)**.
 
-Designed specifically for secure, air-gapped environments with **zero internet connectivity**, ANVAYA ingests multi-format evidence caches—including PDF reports, scanned handwritten notes/screenshots, and recorded audio wiretaps—into a unified semantic retrieval index. It leverages a local quantized Large Language Model to synthesize grounded, hallucination-free intelligence briefings equipped with **clickable page and millisecond audio timestamp citations**.
+Designed specifically for secure, air-gapped environments with **zero internet connectivity**, ANVAYA ingests multi-format evidence caches—including PDF reports, scanned handwritten notes/screenshots, zero-text drone shots, and recorded audio wiretaps—into a unified semantic retrieval index. It leverages local quantized Large Language Models (Ollama / Llama 3.2 3B / Qwen 2.5 / DeepSeek R1) to synthesize grounded, hallucination-free intelligence briefings equipped with **clickable page and millisecond audio timestamp citations**.
 
 ---
 
-## 🛠️ Final Technology Stack (Option A: 100% Offline Single-Page Architecture)
+## 🛠️ Technology Stack
 
-* **Frontend Console**: Vite + React 19 + TypeScript + Tailwind CSS (0 SSR hydration bugs, instant static build)
-* **Backend Engine**: Python 3.11 + FastAPI + Uvicorn
-* **Document Ingestion**: PyMuPDF (`fitz`) + Regex text normalization (`pdf_parser.py`)
-* **Image OCR Ingestion**: PaddleOCR / Tesseract 5 (`image_ocr.py`)
-* **Audio Ingestion**: `faster-whisper-tiny` (CTranslate2 INT8 millisecond speech-to-text)
-* **Vector Store**: Embedded ChromaDB (HNSW index) + `BAAI/bge-small-en-v1.5` embeddings (133MB ONNX)
-* **Hybrid Search**: Dense Cosine Similarity + BM25 Lexical Keyword Search (Reciprocal Rank Fusion RRF)
-* **Local Offline LLM**: `Llama-3.2-3B-Instruct.Q4_K_M.gguf` via `llama.cpp` (100% Zero Cloud)
-* **Citation Navigation**: `pdfjs-dist` (PDF page highlight) + `wavesurfer.js` (Audio timestamp waveform player)
+* **Frontend Console**: Vite + React 19 + TypeScript + Tailwind CSS
+* **Backend Engine**: Python 3.11/3.13 + FastAPI + Uvicorn
+* **PDF Ingestion (`pdf_parser.py`)**: PyMuPDF (`fitz`) layout block sorting + spatial bounding boxes `[x0,y0,x1,y1]` + Markdown grid table extraction
+* **Image OCR & Vision (`image_ocr.py`)**: EasyOCR + OpenCV adaptive deskewing/scaling + HuggingFace BLIP (`Salesforce/blip-image-captioning-base`) visual scene recognition
+* **Audio Transcription (`audio_transcriber.py`)**: `faster-whisper` (INT8 CPU engine) + Voice Activity Detection (`vad_filter=True`) + timestamped segmenting
+* **Master Ingestor (`master_ingestor.py`)**: Multimodal auto-routing + 64-bit SimHash bitwise near-duplicate deduplication ($h \le 3$)
+* **Hybrid Vector Store (`vector_store.py`)**: ChromaDB + `BAAI/bge-small-en-v1.5` embeddings (384D) + SQLite FTS5 BM25 keyword search with Reciprocal Rank Fusion (RRF $k=60$) & WAL thread lock protection
+* **Local LLM Engine (`local_llm.py`)**: Multi-Model Task Dispatcher (Ollama API / `llama.cpp` GGUF) with source-anchored system prompts & regex citation parser
+* **API Gateway (`main.py`)**: FastAPI REST endpoints + CORS + automated full system integrity diagnostics (`/api/health/full`)
 
 ---
 
 ## 📁 Repository Folder Structure
 
-```
+```text
 ANVAYA/
-├── README.md                           # Updated Project Definition & Tech Stack
+├── README.md                           # Documentation & Setup Guide
+├── .gitignore                          # Clean open-source ignore filters
 ├── backend/                            # Python FastAPI Server Engine
-│   ├── app/
-│   │   ├── main.py                     # FastAPI entry point
-│   │   ├── api/                        # REST endpoints (/ingest, /query)
-│   │   └── services/                   # Data processing modules
-│   │       ├── pdf_parser.py           # PyMuPDF & Regex text cleaning module
-│   │       ├── image_ocr.py            # PaddleOCR screenshot text extractor
-│   │       ├── audio_transcriber.py    # Whisper timestamp audio transcriber
-│   │       ├── vector_store.py         # ChromaDB + BM25 RRF hybrid index
-│   │       └── local_llm.py            # llama.cpp local quantized LLM engine
-│   └── requirements.txt                # Python backend dependencies
+│   └── app/
+│       ├── main.py                     # FastAPI REST API Gateway & Health Diagnostics
+│       └── services/                   # 7 Core Multimodal RAG Modules
+│           ├── ingestion/
+│           │   ├── pdf_parser.py       # Layout-aware PDF & Markdown table parser
+│           │   ├── image_ocr.py        # OCR + BLIP visual image captioner
+│           │   ├── audio_transcriber.py# Timestamped Whisper audio transcriber
+│           │   └── master_ingestor.py  # Dispatcher & SimHash deduplicator
+│           ├── vectorstore/
+│           │   └── vector_store.py     # ChromaDB + SQLite FTS5 RRF hybrid store
+│           └── llm/
+│               └── local_llm.py        # Task-based Ollama model dispatcher
 ├── frontend/                           # Vite + React 19 Analyst UI Console
 │   ├── src/
-│   │   ├── main.tsx
 │   │   ├── App.tsx                     # Master Analyst Console UI
-│   │   └── index.css                   # Tailwind CSS
+│   │   ├── services/
+│   │   │   └── api.ts                  # Axios backend API client
+│   │   └── main.tsx
 │   ├── index.html
-│   ├── vite.config.ts
+│   ├── tsconfig.json                   # Vite TypeScript configuration
 │   └── package.json
 └── data/                               # Local Storage & Vector Database
-    ├── processed_text/                 # Cleaned text outputs & metadata
-    └── chroma_db/                      # Persistent HNSW vector database
+    ├── processed_text/                 # Extracted text outputs
+    ├── chroma_db/                      # Persistent HNSW vector database
+    ├── anvaya_fts.db                   # SQLite FTS5 BM25 keyword index
+    └── uploads/                        # Uploaded evidence file cache
 ```
+
+---
+
+## 🚀 Quick Start Guide
+
+### 1. Start the FastAPI Backend Engine:
+```bash
+# Navigate to project root
+cd e:\SIH
+
+# Run FastAPI backend server
+python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### 2. Start the Vite React Frontend UI:
+```bash
+# Open a second terminal window
+cd e:\SIH\frontend
+
+# Install dependencies & run Vite dev server
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173` in your browser to start using ANVAYA!

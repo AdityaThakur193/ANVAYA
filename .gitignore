@@ -1,24 +1,39 @@
-# Logs
-logs
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# Node & Frontend Build
+node_modules/
+dist/
+.next/
+out/
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+*.tsbuildinfo
 
-node_modules
-dist
-dist-ssr
-*.local
+# ANVAYA Processed Data, Sample Binaries & Vector Databases
+data/processed_text/*
+!data/processed_text/.gitkeep
+data/chroma_db/
+data/uploads/*
+!data/uploads/.gitkeep
+data/anvaya_fts.db
+data/anvaya_fts.db-wal
+data/anvaya_fts.db-shm
+data/metadata.json
+data/sample_case/*
+!data/sample_case/.gitkeep
+data/*.py
+backend/data/
+models/
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# OS Specific
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+Thumbs.db
