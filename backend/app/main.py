@@ -43,6 +43,7 @@ class QueryRequest(BaseModel):
 
 @app.get("/")
 def health_check():
+    print("[HTTP GET /] Root health check request received.", flush=True)
     return {
         "status": "online",
         "air_gapped": True,
@@ -53,10 +54,8 @@ def health_check():
 
 @app.get("/api/health/full")
 def full_system_diagnostics():
-    """
-    Automated System Integrity Check: Verifies end-to-end connectivity
-    of all backend ingestion services, vector store, SQLite FTS5, and local LLM/Ollama engines.
-    """
+    """Automated System Integrity Diagnostic Endpoint."""
+    print("[HTTP GET /api/health/full] Full system integrity diagnostics requested.", flush=True)
     status_report = {
         "api_gateway": "online",
         "air_gapped": True,
@@ -67,13 +66,11 @@ def full_system_diagnostics():
         "services": {}
     }
 
-    # 1. Verify Master Ingestor Sub-Parsers
     status_report["services"]["master_ingestor"] = {
         "status": "connected" if ingestor is not None else "disconnected",
         "parsers": ["PDFParser", "ImageOCRParser (BLIP+EasyOCR)", "AudioTranscriber (Whisper+VAD)"]
     }
 
-    # 2. Verify Vector Store & SQLite FTS5 DB
     try:
         chroma_count = vector_store.collection.count()
         fts_count = vector_store.conn.execute("SELECT count(*) FROM evidence_fts;").fetchone()[0]
@@ -86,7 +83,6 @@ def full_system_diagnostics():
     except Exception as e:
         status_report["services"]["vector_store"] = {"status": "error", "detail": str(e)}
 
-    # 3. Verify Local LLM Engine & Ollama API
     try:
         ollama_models = llm_engine.get_installed_ollama_models()
         status_report["services"]["local_llm"] = {
@@ -103,70 +99,48 @@ def full_system_diagnostics():
 @app.post("/api/ingest")
 async def ingest_evidence_file(file: UploadFile = File(...)):
     """Uploads and ingests a multimodal evidence file (.pdf, .png, .wav) into vector store."""
+    print(f"\n[HTTP POST /api/ingest] Incoming file upload: '{file.filename}'", flush=True)
     file_location = os.path.join(UPLOADS_DIR, file.filename)
     with open(file_location, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
     try:
+        print(f"[INGESTION START] Processing '{file.filename}' through MasterIngestor...", flush=True)
         parsed_result = ingestor.process_file(file_location)
         chunks = parsed_result["chunks"]
         if chunks:
+            print(f"[INDEXING START] Adding {len(chunks)} chunks into ChromaDB & SQLite FTS5...", flush=True)
             vector_store.add_chunks(chunks)
 
+        print(f"[INGESTION COMPLETE] Successfully finished '{file.filename}'! Total chunks: {len(chunks)}", flush=True)
         return {
             "status": "success",
             "file_name": file.filename,
             "media_type": parsed_result["media_type"],
             "is_duplicate": parsed_result.get("is_duplicate", False),
+            "duplicate_of": parsed_result.get("duplicate_of", ""),
             "total_chunks_indexed": len(chunks)
         }
     except Exception as e:
+        print(f"[ERROR /api/ingest] Ingestion failed for {file.filename}: {e}", flush=True)
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
-
-@app.post("/api/sample_case")
-def load_sample_case_bundle():
-    """Ingests pre-populated sample evidence files for 1-click stage demo testing."""
-    if not os.path.exists(SAMPLE_CASE_DIR):
-        raise HTTPException(status_code=404, detail="Sample case directory not found.")
-
-    sample_files = [
-        os.path.join(SAMPLE_CASE_DIR, f)
-        for f in os.listdir(SAMPLE_CASE_DIR)
-        if os.path.isfile(os.path.join(SAMPLE_CASE_DIR, f))
-    ]
-
-    total_chunks = 0
-    indexed_files = []
-
-    for f_path in sample_files:
-        try:
-            res = ingestor.process_file(f_path)
-            chunks = res["chunks"]
-            if chunks:
-                vector_store.add_chunks(chunks)
-                total_chunks += len(chunks)
-                indexed_files.append(res["file_name"])
-        except Exception as err:
-            print(f"[WARN] Sample file ingestion notice for {f_path}: {err}")
-
-    return {
-        "status": "success",
-        "message": "Sample case bundle loaded successfully.",
-        "files_indexed": indexed_files,
-        "total_chunks_indexed": total_chunks
-    }
 
 @app.post("/api/query")
 def query_intelligence_briefing(request: QueryRequest):
     """Executes hybrid RRF search and local LLM grounded intelligence synthesis."""
+    print(f"\n[HTTP POST /api/query] Incoming Query: '{request.query}' (Task Type: {request.task_type})", flush=True)
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
     # 1. Execute Dense + Sparse Hybrid Search (RRF k=60)
+    print(f"[SEARCH START] Executing hybrid ChromaDB + SQLite FTS5 RRF search...", flush=True)
     retrieved_chunks = vector_store.hybrid_search(request.query, top_k=request.top_k)
+    print(f"[SEARCH COMPLETE] Retrieved {len(retrieved_chunks)} top evidence chunks.", flush=True)
 
-    # 2. Synthesize grounded answer via Local LLM Engine with task-based model dispatching
+    # 2. Synthesize grounded answer via Local LLM Engine
+    print(f"[LLM SYNTHESIS START] Dispatching to LocalLLMEngine...", flush=True)
     synthesis = llm_engine.generate_response(request.query, retrieved_chunks, task_type=request.task_type)
+    print(f"[LLM SYNTHESIS COMPLETE] Answer generated with {len(synthesis['citations'])} citations.", flush=True)
 
     return {
         "query": request.query,
